@@ -1,0 +1,6 @@
+{
+  "name": "Chronicles of Aethelgard - 2D Action RPG Engine",
+  "description": "Zero-dependency HTML5 Canvas 2D Action RPG game engine with modular AssetConfig, sprite animations, AABB tile collisions, and live modding tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
