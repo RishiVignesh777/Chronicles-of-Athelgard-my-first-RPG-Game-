@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Chronicles of Aethelgard - Standalone 2D Action RPG</title>
+  <title>Chronicles of Aethelgard - Standalone Multi-Level Action RPG</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
     body, html {
@@ -48,7 +48,7 @@
 </head>
 <body>
   <div id="game-container">
-    <div id="hint-bar">WASD / Arrow Keys: Move &bull; SPACE: Slash Attack &bull; E: Open Chests</div>
+    <div id="hint-bar">WASD / Arrow Keys: Move &bull; SPACE: Slash Attack &bull; Step on Portal (Tile 10) to advance!</div>
     <canvas id="gameCanvas" width="800" height="600"></canvas>
     <div id="mobile-controls">
       <div class="d-pad">
@@ -63,51 +63,102 @@
   <script>
   /**
    * ==============================================================================
-   * 🎮 ASSETCONFIG - USER CUSTOMIZATION HUB
+   * 🗺️ GAME LEVELS CONFIGURATION (MULTI-LEVEL ACTION RPG)
    * ==============================================================================
-   * To change character, enemies, or tiles, paste your custom URLs below!
-   * Supports any external HTTPS image URLs (Imgur, GitHub raw, etc.).
+   * To add or modify levels, simply paste or edit the objects in 'GameLevels' below!
    * ==============================================================================
    */
+  const GameLevels = [
+    {
+      name: "Level 1: The Whispering Woods",
+      tilesetUrl: null,
+      playerSpawn: { col: 2, row: 2 },
+      exitTileId: 10,
+      mapData: [
+        [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+        [3,0,0,0,0,0,5,5,0,0,0,0,3,6,6,6,6,6,6,6,6,3,0,0,0,5,5,0,0,0,8,3],
+        [3,0,0,5,0,0,5,0,0,1,1,1,3,7,7,7,7,7,7,7,7,3,0,5,0,5,0,0,0,0,0,3],
+        [3,0,5,5,0,0,0,0,1,1,0,1,3,7,9,7,7,7,9,7,7,3,0,5,5,0,0,2,2,2,0,3],
+        [3,0,0,0,0,1,1,1,1,0,0,1,4,7,7,7,8,7,7,7,7,4,1,1,1,1,2,2,2,2,0,3],
+        [3,0,0,0,1,1,0,0,0,0,0,1,3,7,7,7,7,7,7,7,7,3,0,0,0,1,2,2,2,2,0,3],
+        [3,5,0,0,1,0,0,5,5,0,0,1,3,6,6,4,4,6,6,6,6,3,0,0,0,1,1,1,2,2,0,3],
+        [3,5,5,0,1,0,5,5,5,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,2,2,0,3],
+        [3,0,0,0,1,0,0,5,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,1,0,0,0,1,1,1,0,3],
+        [3,0,2,2,1,2,2,0,0,0,0,0,0,0,0,1,0,0,8,0,0,0,0,1,1,0,0,0,0,1,0,3],
+        [3,0,2,2,1,2,2,0,5,5,5,0,0,0,0,1,0,0,0,0,0,5,0,0,1,1,1,0,0,1,0,3],
+        [3,0,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5,5,0,0,0,1,1,1,1,0,3],
+        [3,0,2,2,2,2,2,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,5,5,0,0,0,0,0,1,0,3],
+        [3,0,0,2,2,2,0,0,0,8,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,3],
+        [3,0,0,0,0,0,0,5,5,0,0,5,5,0,0,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,0,3],
+        [3,5,0,0,0,0,5,5,5,5,5,5,5,0,0,1,0,0,5,0,0,0,0,0,0,0,0,0,0,1,0,3],
+        [3,5,5,0,0,0,0,0,0,5,5,0,0,0,0,1,0,5,5,5,0,0,0,0,10,0,0,0,0,1,0,3],
+        [3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,3],
+        [3,0,0,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3],
+        [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
+      ]
+    },
+    {
+      name: "Level 2: The Crypt of Malice",
+      tilesetUrl: null,
+      playerSpawn: { col: 1, row: 1 },
+      exitTileId: 10,
+      mapData: [
+        [6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6],
+        [6,7,7,7,7,6,7,7,7,7,7,7,7,7,6,8,7,7,6,7,7,7,7,7,7,6,7,7,7,7,7,6],
+        [6,7,6,6,7,6,7,6,6,6,6,6,6,7,6,6,6,7,6,7,6,6,6,6,7,6,7,6,6,6,7,6],
+        [6,7,6,8,7,6,7,7,7,9,7,7,6,7,7,7,6,7,7,7,6,8,7,6,7,6,7,7,7,6,7,6],
+        [6,7,6,6,7,6,6,6,7,9,7,6,6,6,6,7,6,6,6,7,6,6,7,6,7,6,6,6,7,6,7,6],
+        [6,7,7,7,7,7,7,6,7,7,7,6,7,7,7,7,7,7,6,7,7,7,7,6,7,7,7,6,7,7,7,6],
+        [6,6,6,6,6,6,7,6,6,6,7,6,7,6,6,6,6,7,6,6,6,6,7,6,6,6,7,6,6,6,6,6],
+        [6,7,7,7,7,6,7,7,7,6,7,7,7,6,9,9,6,7,7,7,7,6,7,7,7,6,7,7,7,7,7,6],
+        [6,7,6,6,7,6,6,6,7,6,6,6,7,6,9,9,6,7,6,6,7,6,6,6,7,6,6,6,6,6,7,6],
+        [6,7,6,7,7,7,7,6,7,7,7,6,7,6,7,7,6,7,6,7,7,7,7,6,7,7,7,7,7,6,7,6],
+        [6,7,6,7,6,6,7,6,6,6,7,6,7,6,6,6,6,7,6,7,6,6,7,6,6,6,6,6,7,6,7,6],
+        [6,7,7,7,6,7,7,7,7,6,7,7,7,7,7,7,7,7,7,7,6,7,7,7,7,7,7,6,7,7,7,6],
+        [6,6,6,7,6,7,6,6,7,6,6,6,6,6,6,6,6,6,6,6,6,7,6,6,6,6,7,6,7,6,6,6],
+        [6,7,7,7,6,7,6,8,7,7,7,7,7,7,7,7,7,7,7,7,7,7,6,8,7,6,7,6,7,7,7,6],
+        [6,7,6,6,6,7,6,6,6,6,6,6,6,6,7,7,6,6,6,6,6,6,6,6,7,6,7,6,6,6,7,6],
+        [6,7,7,7,7,7,7,7,7,7,7,7,7,6,7,7,6,7,7,7,7,7,7,7,7,7,7,7,7,7,7,6],
+        [6,6,6,6,6,6,6,6,6,6,6,6,7,6,7,7,6,7,6,6,6,6,6,6,6,6,6,6,6,6,7,6],
+        [6,7,7,7,7,7,7,7,7,7,7,6,7,7,7,7,7,7,6,7,7,7,7,7,7,7,7,7,7,10,7,6],
+        [6,7,7,7,7,7,7,7,7,7,7,6,7,7,7,7,7,7,6,7,7,7,7,7,7,7,7,7,7,7,7,6],
+        [6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6]
+      ]
+    },
+    {
+      name: "Level 3: Citadel of the Fallen King",
+      tilesetUrl: null,
+      playerSpawn: { col: 15, row: 18 },
+      exitTileId: 10,
+      mapData: [
+        [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+        [3,4,4,4,4,4,4,4,4,4,3,8,4,4,4,10,4,4,4,8,3,4,4,4,4,4,4,4,4,4,4,3],
+        [3,4,3,3,3,3,3,3,3,4,3,4,4,4,4,4,4,4,4,4,3,4,3,3,3,3,3,3,3,4,4,3],
+        [3,4,3,7,7,7,7,7,3,4,3,3,3,4,4,4,4,4,3,3,3,4,3,7,7,7,7,7,3,4,4,3],
+        [3,4,3,7,8,7,8,7,3,4,4,4,3,4,4,4,4,4,3,4,4,4,3,7,8,7,8,7,3,4,4,3],
+        [3,4,3,7,7,7,7,7,3,4,4,4,3,4,4,4,4,4,3,4,4,4,3,7,7,7,7,7,3,4,4,3],
+        [3,4,3,3,3,4,3,3,3,4,4,4,3,3,4,4,4,3,3,4,4,4,3,3,3,4,3,3,3,4,4,3],
+        [3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3],
+        [3,3,3,3,4,4,4,3,3,3,3,4,4,4,4,4,4,4,4,4,3,3,3,3,4,4,4,3,3,3,3,3],
+        [3,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3],
+        [3,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,1,3],
+        [3,1,4,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3,3,3,3,3,4,4,1,3],
+        [3,1,4,3,8,4,4,3,4,4,3,3,3,3,4,4,4,3,3,3,3,4,4,3,4,4,8,3,4,4,1,3],
+        [3,1,4,3,4,4,4,3,4,4,3,7,7,3,4,4,4,3,7,7,3,4,4,3,4,4,4,3,4,4,1,3],
+        [3,1,4,3,3,4,3,3,4,4,3,7,7,3,4,4,4,3,7,7,3,4,4,3,3,4,3,3,4,4,1,3],
+        [3,1,4,4,4,4,4,4,4,4,3,3,3,3,4,4,4,3,3,3,3,4,4,4,4,4,4,4,4,4,1,3],
+        [3,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3],
+        [3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+        [3,0,0,0,0,0,0,0,0,0,0,0,0,3,4,4,4,3,0,0,0,0,0,0,0,0,0,0,0,0,0,3],
+        [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
+      ]
+    }
+  ];
+
   const AssetConfig = {
-    // 1. External Asset URLs (Leave blank to use built-in procedural pixel art fallback)
     playerSpriteSheet: "",
     enemySpriteSheet: "",
     tileSet: "",
-
-    // 2. Sprite Animation Slicing Meta
-    playerSpriteMeta: {
-      frameWidth: 32,
-      frameHeight: 32,
-      animations: {
-        idleDown:   { row: 0, startFrame: 0, frameCount: 4, speed: 6 },
-        idleUp:     { row: 1, startFrame: 0, frameCount: 4, speed: 6 },
-        idleLeft:   { row: 2, startFrame: 0, frameCount: 4, speed: 6 },
-        idleRight:  { row: 3, startFrame: 0, frameCount: 4, speed: 6 },
-        walkDown:   { row: 4, startFrame: 0, frameCount: 6, speed: 10 },
-        walkUp:     { row: 5, startFrame: 0, frameCount: 6, speed: 10 },
-        walkLeft:   { row: 6, startFrame: 0, frameCount: 6, speed: 10 },
-        walkRight:  { row: 7, startFrame: 0, frameCount: 6, speed: 10 },
-        attackDown: { row: 8, startFrame: 0, frameCount: 4, speed: 14 },
-        attackUp:   { row: 9, startFrame: 0, frameCount: 4, speed: 14 },
-        attackLeft: { row: 10, startFrame: 0, frameCount: 4, speed: 14 },
-        attackRight:{ row: 11, startFrame: 0, frameCount: 4, speed: 14 },
-      }
-    },
-
-    enemySpriteMeta: {
-      frameWidth: 32,
-      frameHeight: 32,
-      animations: {
-        walkDown: { row: 0, startFrame: 0, frameCount: 4, speed: 6 },
-        walkUp:   { row: 1, startFrame: 0, frameCount: 4, speed: 6 },
-        walkLeft: { row: 2, startFrame: 0, frameCount: 4, speed: 6 },
-        walkRight:{ row: 3, startFrame: 0, frameCount: 4, speed: 6 },
-        hurt:     { row: 4, startFrame: 0, frameCount: 2, speed: 8 }
-      }
-    },
-
-    // 3. Tile Attributes & Colliders
     tileSetMeta: {
       tileSize: 32,
       tiles: {
@@ -124,53 +175,13 @@
         10: { name: 'Portal', solid: false, col: 2, row: 2, colorFallback: '#8b4df5' }
       }
     },
-
-    // 4. Level Map Grid
-    levelMap: [
-      [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
-      [3,0,0,0,0,0,5,5,0,0,0,0,3,6,6,6,6,6,6,6,6,3,0,0,0,5,5,0,0,0,8,3],
-      [3,0,0,5,0,0,5,0,0,1,1,1,3,7,7,7,7,7,7,7,7,3,0,5,0,5,0,0,0,0,0,3],
-      [3,0,5,5,0,0,0,0,1,1,0,1,3,7,9,7,7,7,9,7,7,3,0,5,5,0,0,2,2,2,0,3],
-      [3,0,0,0,0,1,1,1,1,0,0,1,4,7,7,7,8,7,7,7,7,4,1,1,1,1,2,2,2,2,0,3],
-      [3,0,0,0,1,1,0,0,0,0,0,1,3,7,7,7,7,7,7,7,7,3,0,0,0,1,2,2,2,2,0,3],
-      [3,5,0,0,1,0,0,5,5,0,0,1,3,6,6,4,4,6,6,6,6,3,0,0,0,1,1,1,2,2,0,3],
-      [3,5,5,0,1,0,5,5,5,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,2,2,0,3],
-      [3,0,0,0,1,0,0,5,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,1,0,0,0,1,1,1,0,3],
-      [3,0,2,2,1,2,2,0,0,0,0,0,0,0,0,1,0,0,8,0,0,0,0,1,1,0,0,0,0,1,0,3],
-      [3,0,2,2,1,2,2,0,5,5,5,0,0,0,0,1,0,0,0,0,0,5,0,0,1,1,1,0,0,1,0,3],
-      [3,0,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5,5,0,0,0,1,1,1,1,0,3],
-      [3,0,2,2,2,2,2,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,5,5,0,0,0,0,0,1,0,3],
-      [3,0,0,2,2,2,0,0,0,8,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,3],
-      [3,0,0,0,0,0,0,5,5,0,0,5,5,0,0,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,0,3],
-      [3,5,0,0,0,0,5,5,5,5,5,5,5,0,0,1,0,0,5,0,0,0,0,0,0,0,0,0,0,1,0,3],
-      [3,5,5,0,0,0,0,0,0,5,5,0,0,0,0,1,0,5,5,5,0,0,0,0,10,0,0,0,0,1,0,3],
-      [3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,3],
-      [3,0,0,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3],
-      [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
-    ],
-
-    // 5. Action RPG Balance Tuning
     gameplayParams: {
-      playerSpeed: 155,
-      playerHealth: 100,
-      playerAttackDamage: 35,
-      playerHitboxWidth: 18,
-      playerHitboxHeight: 14,
-      playerHitboxOffsetY: 16,
-      attackRange: 32,
-      attackArcRadius: 36,
-      attackDuration: 0.28,
-      cameraLerpSpeed: 6.5,
-      enemySpeed: 70,
-      enemyHealth: 60,
-      enemyDamage: 15,
-      enemyAggroRadius: 175,
-      tileSize: 32,
-      renderScale: 2.0
+      playerSpeed: 155, playerHealth: 100, playerAttackDamage: 35,
+      attackRange: 32, attackDuration: 0.28, enemySpeed: 70, enemyAggroRadius: 175,
+      tileSize: 32, renderScale: 2.0
     }
   };
 
-  // --- Procedural Fallbacks ---
   function genTileset() {
     const c = document.createElement('canvas'); c.width = 128; c.height = 128;
     const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
@@ -220,7 +231,6 @@
     return c.toDataURL();
   }
 
-  // --- Sound Synthesis ---
   const Audio = {
     ctx: null,
     init() { if (!this.ctx && window.AudioContext) this.ctx = new AudioContext(); },
@@ -237,10 +247,34 @@
       o.type = 'square'; o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(40, t+0.1);
       g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.01, t+0.1);
       o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t+0.11);
+    },
+    levelUp() {
+      this.init(); if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.frequency.setValueAtTime(f, t + i*0.08);
+        g.gain.setValueAtTime(0.2, t + i*0.08);
+        g.gain.exponentialRampToValueAtTime(0.001, t + i*0.08 + 0.25);
+        o.connect(g); g.connect(this.ctx.destination);
+        o.start(t + i*0.08); o.stop(t + i*0.08 + 0.28);
+      });
+    },
+    victory() {
+      this.init(); if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(f, t + i*0.12);
+        g.gain.setValueAtTime(0.18, t + i*0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, t + i*0.12 + 0.5);
+        o.connect(g); g.connect(this.ctx.destination);
+        o.start(t + i*0.12); o.stop(t + i*0.12 + 0.55);
+      });
     }
   };
 
-  // --- Engine Setup ---
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
   const images = {};
@@ -253,21 +287,141 @@
   resize();
 
   const player = {
-    x: 130, y: 130, dir: 'down', state: 'idle', animTimer: 0,
+    x: 64, y: 64, dir: 'down', state: 'idle', animTimer: 0,
     health: AssetConfig.gameplayParams.playerHealth, maxHp: AssetConfig.gameplayParams.playerHealth,
     atkTimer: 0, gold: 0, kills: 0
   };
   const camera = { x: 0, y: 0 };
   const keys = {};
-  const enemies = [
-    { x: 340, y: 240, health: 60, dead: false, animTimer: 0, hurtTimer: 0 },
-    { x: 580, y: 310, health: 60, dead: false, animTimer: 0, hurtTimer: 0 },
-    { x: 740, y: 150, health: 60, dead: false, animTimer: 0, hurtTimer: 0 }
-  ];
+  let enemies = [];
   const floatingTexts = [];
 
+  const LevelManager = {
+    currentIndex: 0,
+    isTransitioning: false,
+    transitionAlpha: 0,
+    transitionPhase: 'out',
+    bannerTimer: 0,
+    isGameComplete: false,
+
+    get current() {
+      return GameLevels[this.currentIndex] || GameLevels[0];
+    },
+
+    loadLevel(index) {
+      if (index >= GameLevels.length) {
+        this.triggerVictory();
+        return;
+      }
+
+      this.currentIndex = index;
+      const lvl = this.current;
+      const ts = AssetConfig.gameplayParams.tileSize;
+
+      enemies = [];
+      floatingTexts.length = 0;
+
+      let spawnC = 1, spawnR = 1;
+      if (Array.isArray(lvl.playerSpawn)) {
+        spawnC = lvl.playerSpawn[0]; spawnR = lvl.playerSpawn[1];
+      } else if (lvl.playerSpawn) {
+        spawnC = lvl.playerSpawn.col ?? 1; spawnR = lvl.playerSpawn.row ?? 1;
+      }
+      player.x = spawnC * ts;
+      player.y = spawnR * ts;
+      player.state = 'idle';
+
+      // Spawns
+      enemies.push(
+        { x: (spawnC + 5) * ts, y: (spawnR + 4) * ts, health: 50, dead: false, animTimer: 0, hurtTimer: 0 },
+        { x: (spawnC + 8) * ts, y: (spawnR + 6) * ts, health: 50, dead: false, animTimer: 0, hurtTimer: 0 }
+      );
+
+      const scale = AssetConfig.gameplayParams.renderScale;
+      camera.x = player.x + 16 - canvas.width / (2 * scale);
+      camera.y = player.y + 16 - canvas.height / (2 * scale);
+      this.bannerTimer = 3.0;
+    },
+
+    checkExit() {
+      if (this.isTransitioning || this.isGameComplete) return;
+
+      const lvl = this.current;
+      const ts = AssetConfig.gameplayParams.tileSize;
+      const pCol = Math.floor((player.x + 16) / ts);
+      const pRow = Math.floor((player.y + 20) / ts);
+
+      let triggered = false;
+      if (Array.isArray(lvl.exitTile)) {
+        if (pCol === lvl.exitTile[0] && pRow === lvl.exitTile[1]) triggered = true;
+      } else if (typeof lvl.exitTile === 'object' && lvl.exitTile !== null) {
+        if (pCol === lvl.exitTile.col && pRow === lvl.exitTile.row) triggered = true;
+      } else {
+        const exitId = typeof lvl.exitTile === 'number' ? lvl.exitTile : (lvl.exitTileId ?? 10);
+        if (lvl.mapData[pRow]?.[pCol] === exitId) triggered = true;
+      }
+
+      if (triggered) {
+        this.nextLevel();
+      }
+    },
+
+    nextLevel() {
+      if (this.isTransitioning || this.isGameComplete) return;
+      const nextIdx = this.currentIndex + 1;
+
+      if (nextIdx >= GameLevels.length) {
+        this.triggerVictory();
+        return;
+      }
+
+      Audio.levelUp();
+      this.isTransitioning = true;
+      this.transitionPhase = 'out';
+      this.transitionAlpha = 0;
+    },
+
+    triggerVictory() {
+      this.isGameComplete = true;
+      Audio.victory();
+    },
+
+    restartGame() {
+      this.isGameComplete = false;
+      player.gold = 0;
+      player.kills = 0;
+      player.health = AssetConfig.gameplayParams.playerHealth;
+      this.loadLevel(0);
+    },
+
+    update(dt) {
+      if (this.isGameComplete) return;
+
+      if (this.bannerTimer > 0) this.bannerTimer -= dt;
+
+      if (this.isTransitioning) {
+        if (this.transitionPhase === 'out') {
+          this.transitionAlpha += dt * 2.5;
+          if (this.transitionAlpha >= 1.0) {
+            this.transitionAlpha = 1.0;
+            this.transitionPhase = 'in';
+            this.loadLevel(this.currentIndex + 1);
+          }
+        } else {
+          this.transitionAlpha -= dt * 2.5;
+          if (this.transitionAlpha <= 0) {
+            this.transitionAlpha = 0;
+            this.isTransitioning = false;
+          }
+        }
+      } else {
+        this.checkExit();
+      }
+    }
+  };
+
   function isSolid(c, r) {
-    const map = AssetConfig.levelMap;
+    const map = LevelManager.current.mapData;
     if (r < 0 || r >= map.length || c < 0 || c >= map[0].length) return true;
     const tile = map[r][c];
     const meta = AssetConfig.tileSetMeta.tiles[tile];
@@ -294,7 +448,7 @@
   }
 
   function doAttack() {
-    if (player.state === 'attack') return;
+    if (player.state === 'attack' || LevelManager.isTransitioning || LevelManager.isGameComplete) return;
     player.state = 'attack'; player.atkTimer = 0;
     Audio.swing();
     const range = AssetConfig.gameplayParams.attackRange;
@@ -321,9 +475,15 @@
 
   window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
-    if (e.code === 'Space') doAttack();
+    if (e.code === 'Space') {
+      if (LevelManager.isGameComplete) LevelManager.restartGame();
+      else doAttack();
+    }
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+  canvas.addEventListener('click', () => {
+    if (LevelManager.isGameComplete) LevelManager.restartGame();
+  });
 
   const touch = { u: false, d: false, l: false, r: false };
   function bind(id, k) {
@@ -340,44 +500,48 @@
     const dt = Math.min(0.1, (now - lastTime) / 1000);
     lastTime = now;
 
-    let dx = 0, dy = 0;
-    if (keys['KeyW'] || keys['ArrowUp'] || touch.u) dy -= 1;
-    if (keys['KeyS'] || keys['ArrowDown'] || touch.d) dy += 1;
-    if (keys['KeyA'] || keys['ArrowLeft'] || touch.l) dx -= 1;
-    if (keys['KeyD'] || keys['ArrowRight'] || touch.r) dx += 1;
+    LevelManager.update(dt);
 
-    const spd = AssetConfig.gameplayParams.playerSpeed;
-    if (player.state === 'attack') {
-      player.atkTimer += dt;
-      if (player.atkTimer >= AssetConfig.gameplayParams.attackDuration) player.state = 'idle';
-    } else {
-      const len = Math.hypot(dx, dy);
-      if (len > 0) {
-        player.state = 'walk';
-        const nx = dx / len, ny = dy / len;
-        if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? 'right' : 'left';
-        else player.dir = ny > 0 ? 'down' : 'up';
-        move(player, nx * spd, ny * spd, dt, 18, 14, 16);
+    if (!LevelManager.isGameComplete && !LevelManager.isTransitioning) {
+      let dx = 0, dy = 0;
+      if (keys['KeyW'] || keys['ArrowUp'] || touch.u) dy -= 1;
+      if (keys['KeyS'] || keys['ArrowDown'] || touch.d) dy += 1;
+      if (keys['KeyA'] || keys['ArrowLeft'] || touch.l) dx -= 1;
+      if (keys['KeyD'] || keys['ArrowRight'] || touch.r) dx += 1;
+
+      const spd = AssetConfig.gameplayParams.playerSpeed;
+      if (player.state === 'attack') {
+        player.atkTimer += dt;
+        if (player.atkTimer >= AssetConfig.gameplayParams.attackDuration) player.state = 'idle';
       } else {
-        player.state = 'idle';
+        const len = Math.hypot(dx, dy);
+        if (len > 0) {
+          player.state = 'walk';
+          const nx = dx / len, ny = dy / len;
+          if (Math.abs(nx) > Math.abs(ny)) player.dir = nx > 0 ? 'right' : 'left';
+          else player.dir = ny > 0 ? 'down' : 'up';
+          move(player, nx * spd, ny * spd, dt, 18, 14, 16);
+        } else {
+          player.state = 'idle';
+        }
       }
-    }
-    player.animTimer += dt;
+      player.animTimer += dt;
 
-    for (const e of enemies) {
-      if (e.dead) continue;
-      if (e.hurtTimer > 0) e.hurtTimer -= dt;
-      e.animTimer += dt;
-      const d = Math.hypot(player.x - e.x, player.y - e.y);
-      if (d < AssetConfig.gameplayParams.enemyAggroRadius) {
-        const ang = Math.atan2(player.y - e.y, player.x - e.x);
-        move(e, Math.cos(ang) * AssetConfig.gameplayParams.enemySpeed, Math.sin(ang) * AssetConfig.gameplayParams.enemySpeed, dt, 20, 18, 14);
+      for (const e of enemies) {
+        if (e.dead) continue;
+        if (e.hurtTimer > 0) e.hurtTimer -= dt;
+        e.animTimer += dt;
+        const d = Math.hypot(player.x - e.x, player.y - e.y);
+        if (d < AssetConfig.gameplayParams.enemyAggroRadius) {
+          const ang = Math.atan2(player.y - e.y, player.x - e.x);
+          move(e, Math.cos(ang) * AssetConfig.gameplayParams.enemySpeed, Math.sin(ang) * AssetConfig.gameplayParams.enemySpeed, dt, 20, 18, 14);
+        }
       }
-    }
 
-    const scale = AssetConfig.gameplayParams.renderScale;
-    camera.x += (player.x + 16 - canvas.width / (2 * scale) - camera.x) * Math.min(1, dt * 6.5);
-    camera.y += (player.y + 16 - canvas.height / (2 * scale) - camera.y) * Math.min(1, dt * 6.5);
+      const scale = AssetConfig.gameplayParams.renderScale;
+      camera.x += (player.x + 16 - canvas.width / (2 * scale) - camera.x) * Math.min(1, dt * 6.5);
+      camera.y += (player.y + 16 - canvas.height / (2 * scale) - camera.y) * Math.min(1, dt * 6.5);
+    }
 
     for (let i = floatingTexts.length - 1; i >= 0; i--) {
       floatingTexts[i].y -= 25 * dt;
@@ -390,11 +554,12 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
+    const scale = AssetConfig.gameplayParams.renderScale;
     ctx.scale(scale, scale);
     ctx.translate(-Math.floor(camera.x), -Math.floor(camera.y));
 
     const ts = AssetConfig.gameplayParams.tileSize;
-    const map = AssetConfig.levelMap;
+    const map = LevelManager.current.mapData;
     for (let r=0; r<map.length; r++) {
       for (let c=0; c<map[r].length; c++) {
         const id = map[r][c];
@@ -432,24 +597,62 @@
     ctx.restore();
 
     ctx.fillStyle = 'rgba(15,23,42,0.85)';
-    ctx.fillRect(16, 16, 190, 50);
+    ctx.fillRect(16, 16, 210, 60);
     ctx.strokeStyle = '#334155';
-    ctx.strokeRect(16, 16, 190, 50);
+    ctx.strokeRect(16, 16, 210, 60);
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('LVL ' + (LevelManager.currentIndex + 1) + '/' + GameLevels.length + ': ' + LevelManager.current.name.slice(0, 18), 26, 32);
     ctx.fillStyle = '#f8fafc';
-    ctx.font = 'bold 13px monospace';
-    ctx.fillText('HP: ' + player.health + ' / ' + player.maxHp, 26, 36);
+    ctx.fillText('HP: ' + player.health + ' / ' + player.maxHp, 26, 48);
     ctx.fillStyle = '#fbbf24';
-    ctx.fillText('GOLD: ' + player.gold + ' | KILLS: ' + player.kills, 26, 54);
+    ctx.fillText('GOLD: ' + player.gold + ' | KILLS: ' + player.kills, 26, 64);
+
+    if (LevelManager.bannerTimer > 0 && !LevelManager.isTransitioning && !LevelManager.isGameComplete) {
+      ctx.fillStyle = 'rgba(15,23,42,0.88)';
+      ctx.fillRect(0, canvas.height * 0.22 - 24, canvas.width, 48);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 20px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(LevelManager.current.name.toUpperCase(), canvas.width / 2, canvas.height * 0.22 + 6);
+      ctx.textAlign = 'left';
+    }
+
+    if (LevelManager.isTransitioning && LevelManager.transitionAlpha > 0) {
+      ctx.fillStyle = 'rgba(11, 15, 25, ' + LevelManager.transitionAlpha + ')';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    if (LevelManager.isGameComplete) {
+      ctx.fillStyle = 'rgba(10, 15, 30, 0.9)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const cx = canvas.width / 2, cy = canvas.height / 2;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 36px monospace';
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText('★ YOU WIN! ★', cx, cy - 60);
+      ctx.font = '16px monospace';
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText('THE REALM OF AETHELGARD IS SAVED!', cx, cy - 20);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 15px monospace';
+      ctx.fillText('FINAL SCORE: ' + (player.gold * 10 + player.kills * 100), cx, cy + 20);
+      ctx.fillText('GOLD COLLECTED: ' + player.gold + ' | ENEMIES SLAIN: ' + player.kills, cx, cy + 50);
+      ctx.fillStyle = '#4ade80';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('PRESS [SPACE] OR CLICK TO RESTART QUEST', cx, cy + 100);
+      ctx.textAlign = 'left';
+    }
 
     requestAnimationFrame(loop);
   }
 
-  // Load assets with fallback
   Promise.all([
     new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.player=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.player=f; r();}; f.src=genPlayer(); }; i.src=AssetConfig.playerSpriteSheet||genPlayer(); }),
     new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.enemy=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.enemy=f; r();}; f.src=genEnemy(); }; i.src=AssetConfig.enemySpriteSheet||genEnemy(); }),
     new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.tileset=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.tileset=f; r();}; f.src=genTileset(); }; i.src=AssetConfig.tileSet||genTileset(); })
   ]).then(() => {
+    LevelManager.loadLevel(0);
     requestAnimationFrame(loop);
   });
   </script>

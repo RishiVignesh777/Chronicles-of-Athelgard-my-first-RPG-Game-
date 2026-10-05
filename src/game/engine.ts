@@ -2,8 +2,8 @@
  * ==============================================================================
  * ⚔️ ZERO-DEPENDENCY HTML5 CANVAS 2D ACTION RPG GAME ENGINE
  * ==============================================================================
- * A modular, high-performance, top-down Action RPG engine built in pure Vanilla
- * JavaScript / TypeScript with zero external libraries.
+ * High-performance, top-down Action RPG engine supporting multiple levels,
+ * level transitions, collision grids, audio synthesis, and modular asset loading.
  * ==============================================================================
  */
 
@@ -17,6 +17,7 @@ import {
   generateDefaultPlayerSpriteSheet,
   generateDefaultTileset
 } from './defaultAssets';
+import { LevelManager } from './LevelManager';
 import { soundEffects } from './soundEffects';
 
 export interface FloatingText {
@@ -71,6 +72,9 @@ export class GameEngine {
   public canvas: HTMLCanvasElement;
   public ctx: CanvasRenderingContext2D;
   public config: AssetConfigType;
+
+  // Level Manager (State Machine for Multi-Level Transitions & Victory)
+  public levelManager: LevelManager;
 
   // Asset Loader & Cache
   public loadedImages: Map<string, HTMLImageElement> = new Map();
@@ -148,7 +152,15 @@ export class GameEngine {
     this.ctx = context;
     this.config = customConfig || JSON.parse(JSON.stringify(DEFAULT_ASSET_CONFIG));
 
+    // Initialize Level Manager
+    this.levelManager = new LevelManager(this);
+
     this.initInputListeners();
+  }
+
+  // Active level map accessor
+  public get currentMap(): number[][] {
+    return this.levelManager.getCurrentLevel().mapData;
   }
 
   // ============================================================================
@@ -159,7 +171,6 @@ export class GameEngine {
     this.loadProgress = 10;
     this.loadError = null;
 
-    // Provide default generated base64 sprites if user config is empty
     if (!this.config.playerSpriteSheet || this.config.playerSpriteSheet.trim() === '') {
       this.config.playerSpriteSheet = generateDefaultPlayerSpriteSheet();
     }
@@ -182,7 +193,7 @@ export class GameEngine {
     const loadSingleImage = (key: string, url: string, fallbackType: string): Promise<void> => {
       return new Promise((resolve) => {
         const img = new Image();
-        img.crossOrigin = 'anonymous'; // Support external CORS images (Imgur, GitHub, etc.)
+        img.crossOrigin = 'anonymous';
 
         img.onload = () => {
           this.loadedImages.set(key, img);
@@ -192,8 +203,7 @@ export class GameEngine {
         };
 
         img.onerror = () => {
-          console.warn(`[AssetLoader] Failed to load external URL for ${key} (${url}). Generating high-quality procedural fallback.`);
-          // Generate fallback texture so the game never crashes
+          console.warn(`[AssetLoader] Fallback texture generated for ${key}`);
           let fallbackDataUrl = '';
           if (fallbackType === 'player') fallbackDataUrl = generateDefaultPlayerSpriteSheet();
           else if (fallbackType === 'enemy') fallbackDataUrl = generateDefaultEnemySpriteSheet();
@@ -216,94 +226,11 @@ export class GameEngine {
     try {
       await Promise.all(assetsToLoad.map(a => loadSingleImage(a.key, a.url, a.fallbackType)));
       this.isLoaded = true;
-      this.initWorld();
+      await this.levelManager.loadLevel(this.levelManager.currentLevelIndex);
     } catch (err) {
       console.error('Fatal error loading assets:', err);
       this.loadError = 'Failed to load assets: ' + String(err);
     }
-  }
-
-  // ============================================================================
-  // WORLD INITIALIZATION (Spawn player, parse map, spawn enemies and chests)
-  // ============================================================================
-  public initWorld(): void {
-    const map = this.config.levelMap;
-    const ts = this.config.gameplayParams.tileSize;
-
-    // Reset lists
-    this.enemies = [];
-    this.chests = [];
-    this.particles = [];
-    this.floatingTexts = [];
-
-    // Find spawn tile or default
-    let spawnFound = false;
-    for (let r = 0; r < map.length; r++) {
-      for (let c = 0; c < map[r].length; c++) {
-        const tile = map[r][c];
-        // Path (1) or Wood Floor (4) or Grass (0)
-        if (!spawnFound && (tile === 1 || tile === 4 || tile === 0)) {
-          this.player.x = c * ts + 8;
-          this.player.y = r * ts + 8;
-          spawnFound = true;
-        }
-
-        // Register chests
-        if (tile === 8) {
-          this.chests.push({ col: c, row: r, opened: false });
-        }
-      }
-    }
-
-    // Spawn initial patrolling enemies
-    const enemySpawns = [
-      { col: 14, row: 8 },
-      { col: 18, row: 9 },
-      { col: 26, row: 4 },
-      { col: 28, row: 13 },
-      { col: 23, row: 15 },
-      { col: 6, row: 11 },
-      { col: 9, row: 14 }
-    ];
-
-    let idCounter = 1;
-    for (const sp of enemySpawns) {
-      if (sp.row < map.length && sp.col < map[0].length && !this.isSolidTile(sp.col, sp.row)) {
-        this.enemies.push({
-          id: idCounter++,
-          x: sp.col * ts,
-          y: sp.row * ts,
-          spawnX: sp.col * ts,
-          spawnY: sp.row * ts,
-          vx: 0,
-          vy: 0,
-          direction: 'down',
-          currentAnim: 'walkDown',
-          animTimer: Math.random() * 2,
-          health: this.config.gameplayParams.enemyHealth,
-          maxHealth: this.config.gameplayParams.enemyHealth,
-          hitboxWidth: 20,
-          hitboxHeight: 18,
-          hurtTimer: 0,
-          isDead: false,
-          patrolTimer: Math.random() * 3,
-          targetPatrolX: sp.col * ts,
-          targetPatrolY: sp.row * ts
-        });
-      }
-    }
-
-    // Reset Player Stats
-    this.player.health = this.config.gameplayParams.playerHealth;
-    this.player.maxHealth = this.config.gameplayParams.playerHealth;
-    this.player.isInvulnerable = false;
-    this.player.invulnerableTimer = 0;
-    this.player.state = 'idle';
-
-    // Camera initial snap
-    this.camera.x = this.player.x - (this.canvas.width / (2 * this.config.gameplayParams.renderScale));
-    this.camera.y = this.player.y - (this.canvas.height / (2 * this.config.gameplayParams.renderScale));
-    this.clampCamera();
   }
 
   // ============================================================================
@@ -313,9 +240,15 @@ export class GameEngine {
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-        // Prevent scrolling page while playing
         e.preventDefault();
       }
+
+      // If in Victory screen, Spacebar restarts
+      if (this.levelManager.isGameComplete && e.code === 'Space') {
+        this.levelManager.restartGame();
+        return;
+      }
+
       if (e.code === 'KeyE') {
         this.interactAction();
       }
@@ -325,7 +258,12 @@ export class GameEngine {
       this.keys[e.code] = false;
     });
 
-    // Handle resize
+    this.canvas.addEventListener('click', () => {
+      if (this.levelManager.isGameComplete) {
+        this.levelManager.restartGame();
+      }
+    });
+
     window.addEventListener('resize', () => {
       this.clampCamera();
     });
@@ -342,7 +280,6 @@ export class GameEngine {
         const dist = Math.hypot(pCenter.x - chestCenter.x, pCenter.y - chestCenter.y);
         if (dist <= 48) {
           chest.opened = true;
-          // Spawn gold & sound
           const goldAmount = Math.floor(Math.random() * 35) + 25;
           this.player.gold += goldAmount;
           this.player.score += 150;
@@ -354,31 +291,21 @@ export class GameEngine {
         }
       }
     }
-
-    // Check Portal
-    const playerCol = Math.floor((this.player.x + 16) / ts);
-    const playerRow = Math.floor((this.player.y + 16) / ts);
-    if (this.config.levelMap[playerRow]?.[playerCol] === 10) {
-      soundEffects.playChestOpen();
-      this.addFloatingText(this.player.x + 16, this.player.y - 20, 'PORTAL ACTIVATED! YOU WIN!', '#d9b6ff');
-      this.spawnBurstParticles(this.player.x + 16, this.player.y + 16, '#8b4df5', 25);
-      this.onNotification?.('Victory! You discovered the Ancient Portal of Valerius!');
-    }
   }
 
   // ============================================================================
   // 3. COLLISION DETECTION (Grid-Based AABB Against Solid Tiles)
   // ============================================================================
   public isSolidTile(col: number, row: number): boolean {
-    const map = this.config.levelMap;
+    const map = this.currentMap;
     if (row < 0 || row >= map.length || col < 0 || col >= map[0].length) {
       return true; // Map bounds are solid
     }
     const tileId = map[row][col];
     const meta = this.config.tileSetMeta.tiles[tileId];
-    if (!meta) return true; // Undefined tiles treated as walls
+    if (!meta) return true;
 
-    // If it's an opened chest, it becomes walkable
+    // Opened chests are passable
     if (tileId === 8) {
       const ch = this.chests.find(c => c.col === col && c.row === row);
       if (ch && ch.opened) return false;
@@ -387,9 +314,6 @@ export class GameEngine {
     return meta.solid;
   }
 
-  /**
-   * Tests AABB box vs all overlapping solid tiles in the grid
-   */
   public checkTileCollision(boxX: number, boxY: number, boxW: number, boxH: number): boolean {
     const ts = this.config.gameplayParams.tileSize;
     const startCol = Math.floor(boxX / ts);
@@ -407,9 +331,6 @@ export class GameEngine {
     return false;
   }
 
-  /**
-   * Moves entity with separate X and Y collision resolution to slide smoothly along walls
-   */
   public moveEntityWithSlide(
     entity: { x: number; y: number },
     vx: number,
@@ -423,12 +344,10 @@ export class GameEngine {
     const boxX = newX + (32 - boxW) / 2;
     const currentBoxY = entity.y + offsetY;
 
-    // Try Horizontal Move
     if (!this.checkTileCollision(boxX, currentBoxY, boxW, boxH)) {
       entity.x = newX;
     }
 
-    // Try Vertical Move
     const newY = entity.y + vy * dt;
     const currentBoxX = entity.x + (32 - boxW) / 2;
     const boxY = newY + offsetY;
@@ -447,18 +366,15 @@ export class GameEngine {
     const viewW = this.canvas.width / scale;
     const viewH = this.canvas.height / scale;
 
-    // Camera target is player center
     this.camera.targetX = this.player.x + 16 - viewW / 2;
     this.camera.targetY = this.player.y + 16 - viewH / 2;
 
-    // Smooth Lerp
     const lerp = Math.min(1.0, dt * params.cameraLerpSpeed);
     this.camera.x += (this.camera.targetX - this.camera.x) * lerp;
     this.camera.y += (this.camera.targetY - this.camera.y) * lerp;
 
     this.clampCamera();
 
-    // Screen Shake decay
     if (this.camera.shakeDuration > 0) {
       this.camera.shakeDuration -= dt;
       if (this.camera.shakeDuration <= 0) {
@@ -473,8 +389,9 @@ export class GameEngine {
     const viewW = this.canvas.width / scale;
     const viewH = this.canvas.height / scale;
 
-    const mapCols = this.config.levelMap[0]?.length || 32;
-    const mapRows = this.config.levelMap.length || 20;
+    const map = this.currentMap;
+    const mapCols = map[0]?.length || 32;
+    const mapRows = map.length || 20;
     const mapPixelW = mapCols * params.tileSize;
     const mapPixelH = mapRows * params.tileSize;
 
@@ -494,7 +411,7 @@ export class GameEngine {
   // COMBAT & ATTACK EXECUTION
   // ============================================================================
   private triggerPlayerAttack(): void {
-    if (this.player.state === 'attack') return;
+    if (this.player.state === 'attack' || this.levelManager.isTransitioning || this.levelManager.isGameComplete) return;
 
     this.player.state = 'attack';
     this.player.attackTimer = 0;
@@ -502,7 +419,6 @@ export class GameEngine {
 
     soundEffects.playSwordSwing();
 
-    // Determine sword hitbox in front of player
     const params = this.config.gameplayParams;
     const pCenter = { x: this.player.x + 16, y: this.player.y + 16 };
     let strikeX = pCenter.x;
@@ -513,20 +429,16 @@ export class GameEngine {
     else if (this.player.direction === 'left') strikeX -= params.attackRange;
     else if (this.player.direction === 'right') strikeX += params.attackRange;
 
-    // Check hit against active enemies
-    let hitCount = 0;
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
       const eCenter = { x: enemy.x + 16, y: enemy.y + 16 };
       const dist = Math.hypot(strikeX - eCenter.x, strikeY - eCenter.y);
 
       if (dist <= params.attackArcRadius) {
-        hitCount++;
         const dmg = params.playerAttackDamage + Math.floor(Math.random() * 6);
         enemy.health -= dmg;
         enemy.hurtTimer = 0.3;
 
-        // Knockback away from player
         const angle = Math.atan2(eCenter.y - pCenter.y, eCenter.x - pCenter.x);
         enemy.x += Math.cos(angle) * 14;
         enemy.y += Math.sin(angle) * 14;
@@ -593,9 +505,6 @@ export class GameEngine {
     }
   }
 
-  // ============================================================================
-  // PARTICLES & COMBAT FLOATING TEXT
-  // ============================================================================
   public addFloatingText(x: number, y: number, text: string, color: string): void {
     this.floatingTexts.push({
       x,
@@ -630,9 +539,26 @@ export class GameEngine {
   public update(dt: number): void {
     if (!this.isLoaded || this.isPaused) return;
 
+    // 1. Update Level Manager State Machine (transitions, victory, exit collisions)
+    this.levelManager.update(dt);
+
+    // If game is complete (Victory state), freeze game loop physics & movement!
+    if (this.levelManager.isGameComplete) {
+      this.onStateUpdate?.(this);
+      return;
+    }
+
     const params = this.config.gameplayParams;
 
-    // 1. Process Input Vector
+    // If currently fading between levels, freeze player movement
+    if (this.levelManager.isTransitioning) {
+      this.player.vx = 0;
+      this.player.vy = 0;
+      this.onStateUpdate?.(this);
+      return;
+    }
+
+    // 2. Process Input
     let inputX = 0;
     let inputY = 0;
 
@@ -641,18 +567,16 @@ export class GameEngine {
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) inputX -= 1;
     if (this.keys['KeyD'] || this.keys['ArrowRight']) inputX += 1;
 
-    // Apply Virtual / Touch input if present
     if (this.virtualInput.dx !== 0 || this.virtualInput.dy !== 0) {
       inputX = this.virtualInput.dx;
       inputY = this.virtualInput.dy;
     }
 
-    // Spacebar attack
     if ((this.keys['Space'] || this.virtualInput.attack) && this.player.state !== 'attack') {
       this.triggerPlayerAttack();
     }
 
-    // 2. Player State & Movement
+    // 3. Player Movement & Animation
     if (this.player.state === 'attack') {
       this.player.attackTimer += dt;
       this.player.animTimer += dt;
@@ -661,14 +585,12 @@ export class GameEngine {
         this.player.attackTimer = 0;
       }
     } else {
-      // Normalize diagonal velocity so diagonal movement isn't 1.414x faster
       const len = Math.hypot(inputX, inputY);
       if (len > 0.05) {
         this.player.state = 'walk';
         const normX = inputX / len;
         const normY = inputY / len;
 
-        // Facing direction
         if (Math.abs(normX) > Math.abs(normY)) {
           this.player.direction = normX > 0 ? 'right' : 'left';
         } else {
@@ -679,7 +601,6 @@ export class GameEngine {
         this.player.vy = normY * params.playerSpeed;
         this.player.animTimer += dt;
 
-        // Move with smooth wall sliding
         this.moveEntityWithSlide(
           this.player,
           this.player.vx,
@@ -697,7 +618,6 @@ export class GameEngine {
       }
     }
 
-    // Invulnerability timer countdown
     if (this.player.isInvulnerable) {
       this.player.invulnerableTimer -= dt;
       if (this.player.invulnerableTimer <= 0) {
@@ -705,10 +625,10 @@ export class GameEngine {
       }
     }
 
-    // Hazard tiles check (Spikes - tile 9)
+    // Spikes check (Tile 9)
     const pCol = Math.floor((this.player.x + 16) / params.tileSize);
     const pRow = Math.floor((this.player.y + 20) / params.tileSize);
-    if (this.config.levelMap[pRow]?.[pCol] === 9 && !this.player.isInvulnerable && !this.godMode) {
+    if (this.currentMap[pRow]?.[pCol] === 9 && !this.player.isInvulnerable && !this.godMode) {
       this.player.health = Math.max(0, this.player.health - 8);
       this.player.isInvulnerable = true;
       this.player.invulnerableTimer = 0.5;
@@ -717,7 +637,7 @@ export class GameEngine {
       this.triggerScreenShake(2.5, 0.2);
     }
 
-    // 3. Enemies AI (Patrol & Chase)
+    // 4. Enemies AI
     const pCenter = { x: this.player.x + 16, y: this.player.y + 16 };
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
@@ -733,19 +653,13 @@ export class GameEngine {
       let evx = 0;
       let evy = 0;
 
-      // Aggro logic: If within radius, chase player
       if (distToPlayer <= params.enemyAggroRadius) {
         const angle = Math.atan2(pCenter.y - eCenter.y, pCenter.x - eCenter.x);
         evx = Math.cos(angle) * params.enemySpeed;
         evy = Math.sin(angle) * params.enemySpeed;
 
-        if (Math.abs(evx) > Math.abs(evy)) {
-          enemy.direction = evx > 0 ? 'right' : 'left';
-        } else {
-          enemy.direction = evy > 0 ? 'down' : 'up';
-        }
+        enemy.direction = Math.abs(evx) > Math.abs(evy) ? (evx > 0 ? 'right' : 'left') : (evy > 0 ? 'down' : 'up');
 
-        // Damage player on contact
         if (distToPlayer <= 22 && !this.player.isInvulnerable && !this.godMode) {
           this.player.health = Math.max(0, this.player.health - params.enemyDamage);
           this.player.isInvulnerable = true;
@@ -755,7 +669,6 @@ export class GameEngine {
           this.addFloatingText(this.player.x + 16, this.player.y, `-${params.enemyDamage}`, '#ff1e1e');
         }
       } else {
-        // Patrol wandering
         enemy.patrolTimer -= dt;
         if (enemy.patrolTimer <= 0) {
           enemy.patrolTimer = Math.random() * 3 + 2;
@@ -775,39 +688,28 @@ export class GameEngine {
         }
       }
 
-      // Move enemy with tile collision
       this.moveEntityWithSlide(enemy, evx, evy, dt, enemy.hitboxWidth, enemy.hitboxHeight, 14);
-
-      // Animation selection
       const dirCapitalized = enemy.direction.charAt(0).toUpperCase() + enemy.direction.slice(1);
       enemy.currentAnim = enemy.hurtTimer > 0 ? 'hurt' : `walk${dirCapitalized}`;
     }
 
-    // 4. Update Particles
+    // 5. Update Particles & Floating Text
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.life += dt;
-      if (p.life >= p.maxLife) {
-        this.particles.splice(i, 1);
-      }
+      if (p.life >= p.maxLife) this.particles.splice(i, 1);
     }
 
-    // 5. Update Floating Texts
     for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
       const ft = this.floatingTexts[i];
-      ft.y -= 25 * dt; // Rise up
+      ft.y -= 25 * dt;
       ft.lifetime += dt;
-      if (ft.lifetime >= ft.maxLifetime) {
-        this.floatingTexts.splice(i, 1);
-      }
+      if (ft.lifetime >= ft.maxLifetime) this.floatingTexts.splice(i, 1);
     }
 
-    // 6. Camera Follow
     this.updateCamera(dt);
-
-    // Notify listeners
     this.onStateUpdate?.(this);
   }
 
@@ -818,9 +720,8 @@ export class GameEngine {
     const scale = this.config.gameplayParams.renderScale;
     const ts = this.config.gameplayParams.tileSize;
 
-    // Reset transform & clear
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.ctx.fillStyle = '#111317';
+    this.ctx.fillStyle = '#0b0f19';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     if (!this.isLoaded) {
@@ -828,11 +729,9 @@ export class GameEngine {
       return;
     }
 
-    // Apply Camera & Scaling transforms
     this.ctx.save();
     this.ctx.scale(scale, scale);
 
-    // Apply Screen Shake
     let shakeX = 0;
     let shakeY = 0;
     if (this.camera.shake > 0) {
@@ -863,15 +762,18 @@ export class GameEngine {
     // 6. Draw Floating Combat Text
     this.renderFloatingTexts();
 
-    // 7. Debug Colliders Wireframe (if toggled)
+    // 7. Debug Colliders
     if (this.showColliders) {
       this.renderDebugColliders(ts);
     }
 
     this.ctx.restore();
 
-    // 8. Draw Screen Space HUD (Health, Gold, Minimap)
+    // 8. Draw Screen Space HUD (Health, Gold, Minimap, Current Level)
     this.renderHUD();
+
+    // 9. Draw Level Transition Overlays & Victory Screen
+    this.levelManager.renderOverlays(this.ctx, this.canvas.width, this.canvas.height);
   }
 
   private renderLoadingScreen(): void {
@@ -880,7 +782,6 @@ export class GameEngine {
     this.ctx.textAlign = 'center';
     this.ctx.fillText('LOADING RPG REALM ASSETS...', this.canvas.width / 2, this.canvas.height / 2 - 20);
 
-    // Progress bar
     const barW = 280;
     const barH = 14;
     const barX = (this.canvas.width - barW) / 2;
@@ -898,10 +799,9 @@ export class GameEngine {
 
   private renderTiles(ts: number): void {
     const tilesetImg = this.loadedImages.get('tileset');
-    const map = this.config.levelMap;
+    const map = this.currentMap;
     const tilesMeta = this.config.tileSetMeta.tiles;
 
-    // View frustum culling
     const scale = this.config.gameplayParams.renderScale;
     const minCol = Math.max(0, Math.floor(this.camera.x / ts));
     const maxCol = Math.min(map[0].length - 1, Math.ceil((this.camera.x + this.canvas.width / scale) / ts));
@@ -920,7 +820,6 @@ export class GameEngine {
           const row = meta ? meta.row : 0;
           this.ctx.drawImage(tilesetImg, col * ts, row * ts, ts, ts, dx, dy, ts, ts);
         } else {
-          // Color fallback
           this.ctx.fillStyle = meta?.colorFallback || '#444';
           this.ctx.fillRect(dx, dy, ts, ts);
         }
@@ -929,12 +828,10 @@ export class GameEngine {
   }
 
   private renderChests(ts: number): void {
-    const tilesetImg = this.loadedImages.get('tileset');
     for (const chest of this.chests) {
       const dx = chest.col * ts;
       const dy = chest.row * ts;
       if (chest.opened) {
-        // Draw open chest indicator
         this.ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
         this.ctx.fillRect(dx, dy, ts, ts);
         this.ctx.fillStyle = '#ffd700';
@@ -942,7 +839,6 @@ export class GameEngine {
         this.ctx.textAlign = 'center';
         this.ctx.fillText('OPEN', dx + 16, dy + 20);
       } else {
-        // Glowing aura for unopened treasure
         this.ctx.fillStyle = 'rgba(255, 235, 59, 0.15)';
         this.ctx.beginPath();
         this.ctx.arc(dx + 16, dy + 16, 18, 0, Math.PI * 2);
@@ -970,7 +866,6 @@ export class GameEngine {
         enemy.hurtTimer > 0
       );
 
-      // Enemy Health Bar
       const hpPct = Math.max(0, enemy.health / enemy.maxHealth);
       const barW = 24;
       const barH = 3;
@@ -988,9 +883,8 @@ export class GameEngine {
     const playerImg = this.loadedImages.get('player');
     if (!playerImg) return;
 
-    // Flash when invulnerable
     if (this.player.isInvulnerable && Math.floor(Date.now() / 80) % 2 === 0) {
-      return; // Skip rendering frame for flicker
+      return;
     }
 
     const dirCapitalized = this.player.direction.charAt(0).toUpperCase() + this.player.direction.slice(1);
@@ -1007,7 +901,6 @@ export class GameEngine {
       32
     );
 
-    // Draw sword slash visual arc during attack
     if (this.player.state === 'attack') {
       const pCenter = { x: this.player.x + 16, y: this.player.y + 16 };
       const range = this.config.gameplayParams.attackRange;
@@ -1053,21 +946,18 @@ export class GameEngine {
   private renderDebugColliders(ts: number): void {
     const params = this.config.gameplayParams;
 
-    // Player Hitbox
     this.ctx.strokeStyle = '#00ff66';
     this.ctx.lineWidth = 1;
     const pBoxX = this.player.x + (32 - params.playerHitboxWidth) / 2;
     const pBoxY = this.player.y + params.playerHitboxOffsetY;
     this.ctx.strokeRect(pBoxX, pBoxY, params.playerHitboxWidth, params.playerHitboxHeight);
 
-    // Enemy Hitboxes
     this.ctx.strokeStyle = '#ff3333';
     for (const enemy of this.enemies) {
       if (enemy.isDead) continue;
       const eBoxX = enemy.x + (32 - enemy.hitboxWidth) / 2;
       const eBoxY = enemy.y + 14;
       this.ctx.strokeRect(eBoxX, eBoxY, enemy.hitboxWidth, enemy.hitboxHeight);
-      // Aggro circle
       this.ctx.strokeStyle = 'rgba(255, 50, 50, 0.2)';
       this.ctx.beginPath();
       this.ctx.arc(enemy.x + 16, enemy.y + 16, params.enemyAggroRadius, 0, Math.PI * 2);
@@ -1077,38 +967,39 @@ export class GameEngine {
 
   private renderHUD(): void {
     const hpPct = Math.max(0, this.player.health / this.player.maxHealth);
+    const curLevel = this.levelManager.getCurrentLevel();
 
-    // Health Bar Container (Top-Left)
-    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    this.ctx.fillRect(16, 16, 210, 54);
+    // Top-Left HP & Level Badge
+    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    this.ctx.fillRect(16, 16, 230, 68);
     this.ctx.strokeStyle = '#334155';
     this.ctx.lineWidth = 1.5;
-    this.ctx.strokeRect(16, 16, 210, 54);
+    this.ctx.strokeRect(16, 16, 230, 68);
+
+    // Current Level Name
+    this.ctx.fillStyle = curLevel.themeColor || '#38bdf8';
+    this.ctx.font = 'bold 11px monospace';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText(`LVL ${this.levelManager.currentLevelIndex + 1}/${this.levelManager.levels.length}: ${curLevel.name.slice(0, 20)}`, 24, 32);
 
     // Health Bar
     this.ctx.fillStyle = '#dc2626';
-    this.ctx.fillRect(24, 38, 194 * hpPct, 12);
+    this.ctx.fillRect(24, 42, 214 * hpPct, 10);
     this.ctx.strokeStyle = '#991b1b';
-    this.ctx.strokeRect(24, 38, 194, 12);
+    this.ctx.strokeRect(24, 42, 214, 10);
 
-    this.ctx.fillStyle = '#f8fafc';
-    this.ctx.font = 'bold 12px monospace';
-    this.ctx.textAlign = 'left';
-    this.ctx.fillText(`HP: ${Math.round(this.player.health)} / ${this.player.maxHealth}`, 24, 32);
-
-    // Gold & Kills Badge (Top-Left under HP)
+    // Gold & Kills
     this.ctx.fillStyle = '#fbbf24';
     this.ctx.font = '11px monospace';
-    this.ctx.fillText(`GOLD: ${this.player.gold}  |  KILLS: ${this.player.kills}`, 24, 62);
+    this.ctx.fillText(`HP: ${Math.round(this.player.health)}  |  GOLD: ${this.player.gold}  |  KILLS: ${this.player.kills}`, 24, 70);
 
-    // Top-Right Minimap
     if (this.showMinimap) {
       this.renderMinimap();
     }
   }
 
   private renderMinimap(): void {
-    const map = this.config.levelMap;
+    const map = this.currentMap;
     const cols = map[0].length;
     const rows = map.length;
     const mmScale = 3;
@@ -1117,7 +1008,7 @@ export class GameEngine {
     const mmX = this.canvas.width - mmW - 16;
     const mmY = 16;
 
-    this.ctx.fillStyle = 'rgba(10, 14, 23, 0.8)';
+    this.ctx.fillStyle = 'rgba(10, 14, 23, 0.85)';
     this.ctx.fillRect(mmX - 2, mmY - 2, mmW + 4, mmH + 4);
     this.ctx.strokeStyle = '#475569';
     this.ctx.strokeRect(mmX - 2, mmY - 2, mmW + 4, mmH + 4);
@@ -1125,26 +1016,24 @@ export class GameEngine {
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const tile = map[r][c];
-        let color = '#2e7d32'; // grass
-        if (tile === 1) color = '#8d6e63'; // path
-        else if (tile === 2) color = '#1565c0'; // water
-        else if (tile === 3 || tile === 6) color = '#455a64'; // wall
-        else if (tile === 8) color = '#ffd700'; // chest
-        else if (tile === 10) color = '#9c27b0'; // portal
+        let color = '#2e7d32';
+        if (tile === 1) color = '#8d6e63';
+        else if (tile === 2) color = '#1565c0';
+        else if (tile === 3 || tile === 6) color = '#455a64';
+        else if (tile === 8) color = '#ffd700';
+        else if (tile === 10) color = '#a855f7';
 
         this.ctx.fillStyle = color;
         this.ctx.fillRect(mmX + c * mmScale, mmY + r * mmScale, mmScale, mmScale);
       }
     }
 
-    // Player Blip (cyan)
     const ts = this.config.gameplayParams.tileSize;
     const pBlipX = mmX + (this.player.x / ts) * mmScale;
     const pBlipY = mmY + (this.player.y / ts) * mmScale;
     this.ctx.fillStyle = '#00ffff';
     this.ctx.fillRect(pBlipX - 1, pBlipY - 1, 3, 3);
 
-    // Enemy Blips (red)
     this.ctx.fillStyle = '#ff3333';
     for (const e of this.enemies) {
       if (e.isDead) continue;
@@ -1175,14 +1064,11 @@ export class GameEngine {
   private loop = (currentTime: number): void => {
     if (!this.isRunning) return;
 
-    // Delta time calculation in seconds
     let dt = (currentTime - this.lastTime) / 1000;
     this.lastTime = currentTime;
 
-    // Cap delta time to 0.1s to prevent huge jumps if tab was blurred/throttled
     if (dt > 0.1) dt = 0.1;
 
-    // FPS Counter
     this.fpsCounter++;
     this.fpsTimer += dt;
     if (this.fpsTimer >= 1.0) {

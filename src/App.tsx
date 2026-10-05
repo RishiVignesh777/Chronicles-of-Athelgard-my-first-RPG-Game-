@@ -6,8 +6,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   DEFAULT_ASSET_CONFIG,
-  DEFAULT_LEVEL_MAP,
-  AssetConfigType
+  AssetConfigType,
+  LevelConfig
 } from './game/AssetConfig';
 import { GameEngine } from './game/engine';
 import { soundEffects } from './game/soundEffects';
@@ -15,7 +15,6 @@ import { generateStandaloneIndexHtml } from './game/standaloneGenerator';
 import {
   Sword,
   Shield,
-  Map as MapIcon,
   Sliders,
   Download,
   Copy,
@@ -25,12 +24,13 @@ import {
   Eye,
   RotateCcw,
   Sparkles,
-  Maximize2,
-  Code,
   Layers,
-  Image as ImageIcon,
   Flame,
-  Info
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Trophy,
+  Compass
 } from 'lucide-react';
 
 export default function App() {
@@ -43,11 +43,11 @@ export default function App() {
   });
 
   // UI state
-  const [activeTab, setActiveTab] = useState<'assets' | 'map' | 'balance' | 'export' | 'debug'>('assets');
+  const [activeTab, setActiveTab] = useState<'levels' | 'assets' | 'balance' | 'export' | 'debug'>('levels');
+  const [selectedLevelIdx, setSelectedLevelIdx] = useState<number>(0);
   const [panelOpen, setPanelOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [showColliders, setShowColliders] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(true);
   const [godMode, setGodMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
@@ -63,6 +63,10 @@ export default function App() {
     playerX: 0,
     playerY: 0,
     enemiesRemaining: 0,
+    currentLevelIndex: 0,
+    currentLevelName: 'Chapter 1',
+    totalLevels: 3,
+    isVictory: false
   });
 
   // Map painting tool state
@@ -77,6 +81,7 @@ export default function App() {
     engineRef.current = engine;
 
     engine.onStateUpdate = (eng) => {
+      const curLvl = eng.levelManager.getCurrentLevel();
       setStats({
         hp: eng.player.health,
         maxHp: eng.player.maxHealth,
@@ -87,7 +92,12 @@ export default function App() {
         playerX: Math.round(eng.player.x),
         playerY: Math.round(eng.player.y),
         enemiesRemaining: eng.enemies.filter(e => !e.isDead).length,
+        currentLevelIndex: eng.levelManager.currentLevelIndex,
+        currentLevelName: curLvl?.name || 'Realm',
+        totalLevels: eng.levelManager.levels.length,
+        isVictory: eng.levelManager.isGameComplete
       });
+      setSelectedLevelIdx(eng.levelManager.currentLevelIndex);
     };
 
     engine.onNotification = (msg) => {
@@ -121,28 +131,18 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Update audio toggle
   const toggleSound = () => {
     const next = !soundEnabled;
     setSoundEnabled(next);
     soundEffects.enabled = next;
   };
 
-  // Update colliders toggle
   const toggleColliders = () => {
     const next = !showColliders;
     setShowColliders(next);
     if (engineRef.current) engineRef.current.showColliders = next;
   };
 
-  // Update minimap toggle
-  const toggleMinimap = () => {
-    const next = !showMinimap;
-    setShowMinimap(next);
-    if (engineRef.current) engineRef.current.showMinimap = next;
-  };
-
-  // Toggle god mode
   const toggleGodMode = () => {
     const next = !godMode;
     setGodMode(next);
@@ -151,7 +151,53 @@ export default function App() {
     setTimeout(() => setNotification(null), 2500);
   };
 
-  // Reload assets when user changes URLs
+  // Switch Level directly
+  const handleSelectLevel = (idx: number) => {
+    if (!engineRef.current) return;
+    setSelectedLevelIdx(idx);
+    engineRef.current.levelManager.isGameComplete = false;
+    engineRef.current.levelManager.loadLevel(idx);
+    setNotification(`Jumped to Level ${idx + 1}: ${config.levels[idx]?.name}`);
+    setTimeout(() => setNotification(null), 2500);
+  };
+
+  // Add a new custom level
+  const handleAddNewLevel = () => {
+    const newLvlNum = config.levels.length + 1;
+    const newLevel: LevelConfig = {
+      name: `Chapter ${newLvlNum}: The Hidden Caverns`,
+      tilesetUrl: null,
+      playerSpawn: [2, 2],
+      exitTile: 10,
+      exitTileId: 10,
+      themeColor: '#f43f5e',
+      mapData: Array(20).fill(0).map((_, r) =>
+        Array(32).fill(0).map((_, c) => {
+          if (r === 0 || r === 19 || c === 0 || c === 31) return 3;
+          if (r === 16 && c === 28) return 10; // portal
+          if (r === 2 && c === 28) return 8;  // chest
+          if ((r + c) % 8 === 0) return 5;    // tree
+          return 0; // grass
+        })
+      )
+    };
+
+    setConfig(prev => {
+      const updated = {
+        ...prev,
+        levels: [...prev.levels, newLevel]
+      };
+      if (engineRef.current) {
+        engineRef.current.config.levels = updated.levels;
+      }
+      return updated;
+    });
+
+    setNotification(`Added Chapter ${newLvlNum}! Total levels: ${config.levels.length + 1}`);
+    setTimeout(() => setNotification(null), 2500);
+  };
+
+  // Reload assets
   const handleApplyAssets = () => {
     if (!engineRef.current) return;
     engineRef.current.config.playerSpriteSheet = config.playerSpriteSheet;
@@ -163,7 +209,6 @@ export default function App() {
     });
   };
 
-  // Live update gameplay params
   const handleParamChange = (key: keyof typeof config.gameplayParams, value: number) => {
     setConfig(prev => {
       const updated = {
@@ -180,67 +225,24 @@ export default function App() {
     });
   };
 
-  // Map tile editing
+  // Map tile editing for the currently viewed level
   const paintTileAt = (r: number, c: number) => {
     setConfig(prev => {
-      const newMap = prev.levelMap.map(row => [...row]);
+      const updatedLevels = [...prev.levels];
+      const curLvl = updatedLevels[selectedLevelIdx];
+      if (!curLvl) return prev;
+
+      const newMap = curLvl.mapData.map(row => [...row]);
       if (newMap[r] && newMap[r][c] !== undefined) {
         newMap[r][c] = selectedTileId;
       }
+      updatedLevels[selectedLevelIdx] = { ...curLvl, mapData: newMap };
+
       if (engineRef.current) {
-        engineRef.current.config.levelMap = newMap;
+        engineRef.current.config.levels = updatedLevels;
       }
-      return { ...prev, levelMap: newMap };
+      return { ...prev, levels: updatedLevels };
     });
-  };
-
-  // Reset World / Player
-  const handleResetWorld = () => {
-    if (!engineRef.current) return;
-    engineRef.current.initWorld();
-    setNotification('World & Enemies Reset!');
-    setTimeout(() => setNotification(null), 2500);
-  };
-
-  // Preset switchers
-  const loadPreset = (presetName: string) => {
-    let newMap = DEFAULT_LEVEL_MAP;
-    if (presetName === 'dungeon') {
-      // Dungeon labyrinth
-      newMap = Array(20).fill(0).map((_, r) =>
-        Array(32).fill(0).map((_, c) => {
-          if (r === 0 || r === 19 || c === 0 || c === 31) return 6;
-          if (r % 4 === 0 && c > 4 && c < 28 && c !== 16) return 6;
-          if ((r + c) % 9 === 0) return 9; // spikes
-          if ((r * c) % 47 === 0) return 8; // chests
-          return 7; // dungeon floor
-        })
-      );
-    } else if (presetName === 'islands') {
-      // Island archipelago with water
-      newMap = Array(20).fill(0).map((_, r) =>
-        Array(32).fill(0).map((_, c) => {
-          if (r === 0 || r === 19 || c === 0 || c === 31) return 3;
-          const distToCenter = Math.hypot(c - 16, r - 10);
-          if (distToCenter > 13) return 2; // ocean
-          if (distToCenter > 10) return 11; // beach
-          if (r === 10 || c === 16) return 1; // path
-          if ((r + c) % 7 === 0) return 5; // tree
-          return 0; // grass
-        })
-      );
-    }
-
-    setConfig(prev => {
-      const updated = { ...prev, levelMap: newMap };
-      if (engineRef.current) {
-        engineRef.current.config.levelMap = newMap;
-        engineRef.current.initWorld();
-      }
-      return updated;
-    });
-    setNotification(`Loaded "${presetName.toUpperCase()}" realm preset!`);
-    setTimeout(() => setNotification(null), 2500);
   };
 
   // Standalone index.html export
@@ -268,13 +270,15 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    setNotification('Downloaded complete single-file index.html!');
+    setNotification('Downloaded complete single-file index.html with all levels!');
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const activeLevel = config.levels[selectedLevelIdx] || config.levels[0];
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
-      {/* Top Header & Fast Actions */}
+      {/* Top Header & Level Bar */}
       <header className="h-12 bg-slate-900/90 border-b border-slate-800 px-4 flex items-center justify-between z-20 backdrop-blur">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center text-white shadow">
@@ -283,17 +287,43 @@ export default function App() {
           <div>
             <h1 className="text-sm font-semibold tracking-wide flex items-center gap-2">
               Chronicles of Aethelgard
-              <span className="text-[10px] text-emerald-400 font-mono">2D ACTION RPG ENGINE</span>
+              <span className="text-[10px] text-emerald-400 font-mono">MULTI-LEVEL ACTION RPG</span>
             </h1>
           </div>
         </div>
 
+        {/* Level Switcher in Nav Bar */}
+        <div className="flex items-center gap-2 bg-slate-950/80 px-2 py-1 rounded border border-slate-800 text-xs">
+          <button
+            onClick={() => handleSelectLevel(Math.max(0, stats.currentLevelIndex - 1))}
+            disabled={stats.currentLevelIndex === 0}
+            className="p-1 rounded hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent"
+            title="Previous Level"
+          >
+            <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+          <div className="font-mono text-slate-300 flex items-center gap-1.5">
+            <Compass className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="text-slate-400">LVL {stats.currentLevelIndex + 1}/{stats.totalLevels}:</span>
+            <span className="text-slate-100 font-semibold truncate max-w-[130px] sm:max-w-xs">
+              {stats.currentLevelName}
+            </span>
+          </div>
+          <button
+            onClick={() => handleSelectLevel(Math.min(stats.totalLevels - 1, stats.currentLevelIndex + 1))}
+            disabled={stats.currentLevelIndex >= stats.totalLevels - 1}
+            className="p-1 rounded hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent"
+            title="Next Level"
+          >
+            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+        </div>
+
         {/* Live In-Game Status Badges */}
-        <div className="hidden md:flex items-center gap-4 text-xs font-mono text-slate-400">
+        <div className="hidden lg:flex items-center gap-4 text-xs font-mono text-slate-400">
           <div>HP: <span className="text-red-400 font-bold">{Math.round(stats.hp)}</span>/{stats.maxHp}</div>
           <div>GOLD: <span className="text-amber-400 font-bold">{stats.gold}</span></div>
-          <div>ENEMIES: <span className="text-emerald-400 font-bold">{stats.enemiesRemaining}</span></div>
-          <div>POS: <span className="text-sky-400 font-bold">{stats.playerX},{stats.playerY}</span></div>
+          <div>KILLS: <span className="text-emerald-400 font-bold">{stats.kills}</span></div>
           <div>FPS: <span className="text-purple-400 font-bold">{stats.fps}</span></div>
         </div>
 
@@ -333,7 +363,7 @@ export default function App() {
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Modder's Studio</span>
+            <span>Level Studio</span>
           </button>
         </div>
       </header>
@@ -348,12 +378,12 @@ export default function App() {
           />
 
           {/* Quick HUD Overlay at Top Center */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-slate-950/80 border border-slate-800 px-4 py-1.5 rounded text-xs text-slate-300 flex items-center gap-3 backdrop-blur pointer-events-none shadow-lg">
-            <span>WASD / Arrows to Walk</span>
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-slate-950/85 border border-slate-800 px-4 py-1.5 rounded text-xs text-slate-300 flex items-center gap-3 backdrop-blur pointer-events-none shadow-lg">
+            <span>WASD: Walk</span>
             <span className="text-slate-600">&bull;</span>
-            <span className="text-red-400 font-semibold">SPACE to Slash</span>
+            <span className="text-red-400 font-semibold">SPACE: Slash</span>
             <span className="text-slate-600">&bull;</span>
-            <span className="text-amber-400 font-semibold">E to Open Chests</span>
+            <span className="text-purple-400 font-semibold">Enter Portal (Tile 10) to Advance Level!</span>
           </div>
 
           {/* Toast Notification Banner */}
@@ -363,7 +393,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Virtual On-Screen Gamepad for Mobile/Touch & Quick Testing */}
+          {/* Virtual On-Screen Gamepad for Mobile/Touch */}
           <div className="absolute bottom-5 left-6 flex flex-col items-center gap-1 pointer-events-auto md:hidden">
             <button
               onMouseDown={() => { if (engineRef.current) engineRef.current.virtualInput.dy = -1; }}
@@ -424,26 +454,26 @@ export default function App() {
           </div>
         </div>
 
-        {/* Modder's Studio Drawer (Collapsible Right Side Panel) */}
+        {/* Level Studio Drawer (Collapsible Right Side Panel) */}
         {panelOpen && (
           <aside className="w-96 h-full bg-slate-900 border-l border-slate-800 flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200">
             {/* Panel Tabs Header */}
             <div className="flex border-b border-slate-800 bg-slate-950/60 p-1 text-xs">
+              <button
+                onClick={() => setActiveTab('levels')}
+                className={`flex-1 py-2 px-1 text-center font-medium rounded transition-colors ${
+                  activeTab === 'levels' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Levels ({config.levels.length})
+              </button>
               <button
                 onClick={() => setActiveTab('assets')}
                 className={`flex-1 py-2 px-1 text-center font-medium rounded transition-colors ${
                   activeTab === 'assets' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Assets
-              </button>
-              <button
-                onClick={() => setActiveTab('map')}
-                className={`flex-1 py-2 px-1 text-center font-medium rounded transition-colors ${
-                  activeTab === 'map' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Map Editor
+                Sprites
               </button>
               <button
                 onClick={() => setActiveTab('balance')}
@@ -451,7 +481,7 @@ export default function App() {
                   activeTab === 'balance' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Gameplay
+                Tuner
               </button>
               <button
                 onClick={() => setActiveTab('export')}
@@ -473,160 +503,118 @@ export default function App() {
 
             {/* Tab Contents Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs text-slate-300">
-              {/* TAB 1: ASSETCONFIG URLS */}
-              {activeTab === 'assets' && (
-                <div className="space-y-4">
-                  <div className="p-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg text-indigo-200 text-[11px] leading-relaxed">
-                    <strong>AssetConfig External URLs:</strong>
-                    <br />
-                    Paste any direct image URL (Imgur, GitHub raw, Discord cdn, itch.io) to instantly swap character, enemy, or environment art. Leave blank to use built-in procedural pixel art.
-                  </div>
-
-                  {/* Player Sprite Sheet URL */}
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1">
-                      Player Sprite Sheet URL
-                    </label>
-                    <input
-                      type="text"
-                      value={config.playerSpriteSheet}
-                      onChange={(e) => setConfig({ ...config, playerSpriteSheet: e.target.value })}
-                      placeholder="https://.../player_spritesheet.png (or empty for default)"
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Expects 32x32 frames: 4 rows Idle, 4 rows Walk, 4 rows Attack.
-                    </p>
-                  </div>
-
-                  {/* Enemy Sprite Sheet URL */}
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1">
-                      Enemy Sprite Sheet URL
-                    </label>
-                    <input
-                      type="text"
-                      value={config.enemySpriteSheet}
-                      onChange={(e) => setConfig({ ...config, enemySpriteSheet: e.target.value })}
-                      placeholder="https://.../enemy_spritesheet.png (or empty for default)"
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Expects 32x32 frames: 4 rows Walk (4 dirs) + 1 row Hurt.
-                    </p>
-                  </div>
-
-                  {/* Tileset URL */}
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1">
-                      TileSet Image URL
-                    </label>
-                    <input
-                      type="text"
-                      value={config.tileSet}
-                      onChange={(e) => setConfig({ ...config, tileSet: e.target.value })}
-                      placeholder="https://.../tileset.png (or empty for default)"
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      4x4 grid of 32x32 tiles (Grass, Path, Water, Wall, etc.).
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={handleApplyAssets}
-                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-md shadow flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Apply & Reload Assets
-                  </button>
-
-                  <div className="pt-2 border-t border-slate-800">
-                    <h3 className="text-slate-400 font-semibold mb-2">Preset Sprite Packs</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => {
-                          setConfig({ ...config, playerSpriteSheet: '', enemySpriteSheet: '', tileSet: '' });
-                          setTimeout(handleApplyAssets, 50);
-                        }}
-                        className="p-2 rounded bg-slate-800 hover:bg-slate-700 text-left border border-slate-700"
-                      >
-                        <div className="font-semibold text-slate-200">Default Pixel Art</div>
-                        <div className="text-[10px] text-slate-400">Offline Procedural Base64</div>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: MAP EDITOR & TILE PAINTER */}
-              {activeTab === 'map' && (
+              {/* TAB 1: LEVELS & MAP MANAGER */}
+              {activeTab === 'levels' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-300">Tile Palette:</span>
-                    <span className="text-[10px] text-slate-400">Click to pick, then paint below</span>
+                    <span className="font-semibold text-slate-200">Level Selector:</span>
+                    <button
+                      onClick={handleAddNewLevel}
+                      className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[11px] font-medium flex items-center gap-1 shadow"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Add Level
+                    </button>
                   </div>
 
-                  {/* Tile Swatches */}
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {Object.entries(config.tileSetMeta.tiles).map(([idStr, t]) => {
-                      const id = Number(idStr);
-                      const isSelected = selectedTileId === id;
+                  {/* Level Cards List */}
+                  <div className="space-y-2">
+                    {config.levels.map((lvl, idx) => {
+                      const isCurrent = stats.currentLevelIndex === idx;
+                      const isViewing = selectedLevelIdx === idx;
                       return (
-                        <button
-                          key={id}
-                          onClick={() => setSelectedTileId(id)}
-                          className={`p-1.5 rounded flex flex-col items-center gap-1 border transition-all ${
-                            isSelected
-                              ? 'border-indigo-400 bg-indigo-950/80 shadow-md ring-1 ring-indigo-400'
-                              : 'border-slate-800 bg-slate-950 hover:border-slate-700'
+                        <div
+                          key={idx}
+                          className={`p-2.5 rounded-lg border transition-all ${
+                            isViewing
+                              ? 'bg-slate-800/90 border-indigo-500 shadow-md ring-1 ring-indigo-500/50'
+                              : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
                           }`}
                         >
-                          <div
-                            className="w-6 h-6 rounded"
-                            style={{ backgroundColor: t.colorFallback }}
-                          />
-                          <span className="text-[9px] font-mono truncate w-full text-center">
-                            {t.name}
-                          </span>
-                        </button>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-slate-800 text-indigo-300 font-bold text-[10px] flex items-center justify-center">
+                                {idx + 1}
+                              </span>
+                              <input
+                                type="text"
+                                value={lvl.name}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setConfig(prev => {
+                                    const updated = [...prev.levels];
+                                    updated[idx] = { ...updated[idx], name: val };
+                                    if (engineRef.current) engineRef.current.config.levels = updated;
+                                    return { ...prev, levels: updated };
+                                  });
+                                }}
+                                className="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 text-slate-100 font-semibold text-xs focus:outline-none px-1"
+                              />
+                            </div>
+                            <button
+                              onClick={() => handleSelectLevel(idx)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${
+                                isCurrent
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500'
+                                  : 'bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white'
+                              }`}
+                            >
+                              {isCurrent ? 'Active' : 'Play'}
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                            <span>Spawn: [{Array.isArray(lvl.playerSpawn) ? lvl.playerSpawn.join(',') : `${lvl.playerSpawn.col},${lvl.playerSpawn.row}`}]</span>
+                            <span>Exit Tile: {typeof lvl.exitTile === 'number' ? lvl.exitTile : '10 (Portal)'}</span>
+                            <span>Grid: {lvl.mapData[0]?.length || 32}x{lvl.mapData.length || 20}</span>
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
 
-                  {/* World Presets */}
-                  <div className="pt-2 border-t border-slate-800">
-                    <span className="font-semibold text-slate-300 block mb-2">Map Presets:</span>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        onClick={() => loadPreset('forest')}
-                        className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-center text-[10px] font-medium"
-                      >
-                        Forest Keep
-                      </button>
-                      <button
-                        onClick={() => loadPreset('dungeon')}
-                        className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-center text-[10px] font-medium"
-                      >
-                        Catacombs
-                      </button>
-                      <button
-                        onClick={() => loadPreset('islands')}
-                        className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 rounded text-center text-[10px] font-medium"
-                      >
-                        Archipelago
-                      </button>
+                  {/* Tile Palette & Live Painter for Selected Level */}
+                  <div className="pt-2 border-t border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-300">Tile Palette:</span>
+                      <span className="text-[10px] text-slate-400">Click to paint on grid</span>
                     </div>
-                  </div>
 
-                  {/* Interactive Mini Level Painter */}
-                  <div className="pt-2 border-t border-slate-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold text-slate-300">Live Map Painter</span>
-                      <span className="text-[10px] text-slate-400">Click cell to paint</span>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {Object.entries(config.tileSetMeta.tiles).map(([idStr, t]) => {
+                        const id = Number(idStr);
+                        const isSelected = selectedTileId === id;
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => setSelectedTileId(id)}
+                            className={`p-1.5 rounded flex flex-col items-center gap-1 border transition-all ${
+                              isSelected
+                                ? 'border-indigo-400 bg-indigo-950/80 shadow-md ring-1 ring-indigo-400'
+                                : 'border-slate-800 bg-slate-950 hover:border-slate-700'
+                            }`}
+                          >
+                            <div
+                              className="w-5 h-5 rounded"
+                              style={{ backgroundColor: t.colorFallback }}
+                            />
+                            <span className="text-[9px] font-mono truncate w-full text-center">
+                              {id}: {t.name}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="font-semibold text-slate-300">
+                        Map Painter: {activeLevel?.name}
+                      </span>
+                      <span className="text-[10px] text-slate-500">Click cell to paint</span>
+                    </div>
+
                     <div
-                      className="border border-slate-700 rounded p-1 bg-black overflow-auto max-h-56"
+                      className="border border-slate-700 rounded p-1 bg-black overflow-auto max-h-52"
                       onMouseDown={() => setIsPainting(true)}
                       onMouseUp={() => setIsPainting(false)}
                       onMouseLeave={() => setIsPainting(false)}
@@ -634,12 +622,12 @@ export default function App() {
                       <div
                         className="grid"
                         style={{
-                          gridTemplateColumns: `repeat(${config.levelMap[0]?.length || 32}, 8px)`,
-                          gridTemplateRows: `repeat(${config.levelMap.length || 20}, 8px)`,
+                          gridTemplateColumns: `repeat(${activeLevel?.mapData[0]?.length || 32}, 8px)`,
+                          gridTemplateRows: `repeat(${activeLevel?.mapData.length || 20}, 8px)`,
                           gap: '1px'
                         }}
                       >
-                        {config.levelMap.map((row, r) =>
+                        {activeLevel?.mapData.map((row, r) =>
                           row.map((cellId, c) => {
                             const meta = config.tileSetMeta.tiles[cellId];
                             const bg = meta?.colorFallback || '#333';
@@ -661,14 +649,67 @@ export default function App() {
                 </div>
               )}
 
+              {/* TAB 2: SPRITES CONFIG */}
+              {activeTab === 'assets' && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg text-indigo-200 text-[11px] leading-relaxed">
+                    <strong>AssetConfig External URLs:</strong>
+                    <br />
+                    Paste any direct image URL (Imgur, GitHub raw, itch.io) to swap character or enemy art. Leave blank to use built-in procedural pixel art.
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1">
+                      Player Sprite Sheet URL
+                    </label>
+                    <input
+                      type="text"
+                      value={config.playerSpriteSheet}
+                      onChange={(e) => setConfig({ ...config, playerSpriteSheet: e.target.value })}
+                      placeholder="https://.../player.png (or empty for default)"
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1">
+                      Enemy Sprite Sheet URL
+                    </label>
+                    <input
+                      type="text"
+                      value={config.enemySpriteSheet}
+                      onChange={(e) => setConfig({ ...config, enemySpriteSheet: e.target.value })}
+                      placeholder="https://.../enemy.png (or empty for default)"
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1">
+                      Default TileSet URL
+                    </label>
+                    <input
+                      type="text"
+                      value={config.tileSet}
+                      onChange={(e) => setConfig({ ...config, tileSet: e.target.value })}
+                      placeholder="https://.../tileset.png (or empty for default)"
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleApplyAssets}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-md shadow flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Apply & Reload Assets
+                  </button>
+                </div>
+              )}
+
               {/* TAB 3: GAMEPLAY TUNER */}
               {activeTab === 'balance' && (
                 <div className="space-y-4">
-                  <p className="text-slate-400 text-[11px]">
-                    Adjust variables in real-time to fine-tune combat feel, player movement, enemy aggression, and camera.
-                  </p>
-
-                  {/* Player Speed */}
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-slate-300">Player Move Speed:</span>
@@ -685,10 +726,9 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Player Attack Damage */}
                   <div>
                     <div className="flex justify-between mb-1">
-                      <span className="text-slate-300">Player Slash Damage:</span>
+                      <span className="text-slate-300">Slash Damage:</span>
                       <span className="font-mono text-red-400">{config.gameplayParams.playerAttackDamage} DMG</span>
                     </div>
                     <input
@@ -702,24 +742,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Attack Range */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-slate-300">Sword Reach / Range:</span>
-                      <span className="font-mono text-cyan-400">{config.gameplayParams.attackRange} px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={20}
-                      max={60}
-                      step={2}
-                      value={config.gameplayParams.attackRange}
-                      onChange={(e) => handleParamChange('attackRange', Number(e.target.value))}
-                      className="w-full accent-cyan-500"
-                    />
-                  </div>
-
-                  {/* Enemy Chase Speed */}
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-slate-300">Enemy Chase Speed:</span>
@@ -736,24 +758,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Enemy Aggro Radius */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-slate-300">Enemy Aggro Radius:</span>
-                      <span className="font-mono text-amber-400">{config.gameplayParams.enemyAggroRadius} px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={80}
-                      max={350}
-                      step={10}
-                      value={config.gameplayParams.enemyAggroRadius}
-                      onChange={(e) => handleParamChange('enemyAggroRadius', Number(e.target.value))}
-                      className="w-full accent-amber-500"
-                    />
-                  </div>
-
-                  {/* Camera Smoothness */}
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-slate-300">Camera Lerp Speed:</span>
@@ -769,33 +773,16 @@ export default function App() {
                       className="w-full accent-purple-500"
                     />
                   </div>
-
-                  {/* Render Zoom Scale */}
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-slate-300">Render Zoom Scale:</span>
-                      <span className="font-mono text-sky-400">{config.gameplayParams.renderScale}x</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={1.0}
-                      max={3.0}
-                      step={0.5}
-                      value={config.gameplayParams.renderScale}
-                      onChange={(e) => handleParamChange('renderScale', Number(e.target.value))}
-                      className="w-full accent-sky-500"
-                    />
-                  </div>
                 </div>
               )}
 
-              {/* TAB 4: EXPORT STANDALONE INDEX.HTML */}
+              {/* TAB 4: EXPORT STANDALONE */}
               {activeTab === 'export' && (
                 <div className="space-y-4">
                   <div className="p-3 bg-emerald-950/40 border border-emerald-800/50 rounded-lg text-emerald-200 text-[11px] leading-relaxed">
                     <strong>Zero-Dependency Standalone File:</strong>
                     <br />
-                    Download a single self-contained <code className="text-white font-mono">index.html</code> file with pure HTML, inline CSS, and Vanilla JavaScript. It contains your exact AssetConfig at the top of the script tag and runs instantly in any browser!
+                    Download a single self-contained <code className="text-white font-mono">index.html</code> file with pure HTML, inline CSS, and Vanilla JavaScript. It contains your exact <code className="text-white font-mono">GameLevels</code> array at the top of the script tag and runs instantly in any browser!
                   </div>
 
                   <div className="flex gap-2">
@@ -821,7 +808,7 @@ export default function App() {
                       <span>{standaloneHtmlCode.length.toLocaleString()} bytes</span>
                     </div>
                     <pre className="bg-slate-950 border border-slate-800 rounded p-2.5 text-[10px] font-mono text-slate-400 overflow-x-auto max-h-60 leading-tight">
-                      {standaloneHtmlCode.slice(0, 1200)}...
+                      {standaloneHtmlCode.slice(0, 1500)}...
                     </pre>
                   </div>
                 </div>
@@ -830,6 +817,28 @@ export default function App() {
               {/* TAB 5: CHEATS & DEV TOOLS */}
               {activeTab === 'debug' && (
                 <div className="space-y-3">
+                  <button
+                    onClick={() => {
+                      if (!engineRef.current) return;
+                      engineRef.current.levelManager.triggerVictory();
+                    }}
+                    className="w-full py-2 bg-amber-950 hover:bg-amber-900 border border-amber-500 rounded font-medium flex items-center justify-center gap-2 text-amber-200"
+                  >
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <span>Test Victory State ("You Win!")</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (!engineRef.current) return;
+                      engineRef.current.levelManager.triggerLevelTransition();
+                    }}
+                    className="w-full py-2 bg-indigo-950 hover:bg-indigo-900 border border-indigo-500 rounded font-medium flex items-center justify-center gap-2 text-indigo-200"
+                  >
+                    <Compass className="w-4 h-4 text-indigo-400" />
+                    <span>Trigger Next Level Transition</span>
+                  </button>
+
                   <button
                     onClick={toggleGodMode}
                     className={`w-full py-2 rounded font-medium flex items-center justify-center gap-2 border transition-colors ${
@@ -844,7 +853,7 @@ export default function App() {
                     onClick={() => {
                       if (!engineRef.current) return;
                       engineRef.current.player.health = engineRef.current.player.maxHealth;
-                      setNotification('Health fully restored!');
+                      setNotification('Health restored to full!');
                       setTimeout(() => setNotification(null), 2000);
                     }}
                     className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded font-medium flex items-center justify-center gap-2"
@@ -856,41 +865,8 @@ export default function App() {
                   <button
                     onClick={() => {
                       if (!engineRef.current) return;
-                      engineRef.current.enemies.push({
-                        id: Date.now(),
-                        x: engineRef.current.player.x + (Math.random() > 0.5 ? 60 : -60),
-                        y: engineRef.current.player.y + (Math.random() > 0.5 ? 60 : -60),
-                        spawnX: engineRef.current.player.x,
-                        spawnY: engineRef.current.player.y,
-                        vx: 0,
-                        vy: 0,
-                        direction: 'down',
-                        currentAnim: 'walkDown',
-                        animTimer: 0,
-                        health: engineRef.current.config.gameplayParams.enemyHealth,
-                        maxHealth: engineRef.current.config.gameplayParams.enemyHealth,
-                        hitboxWidth: 20,
-                        hitboxHeight: 18,
-                        hurtTimer: 0,
-                        isDead: false,
-                        patrolTimer: 2,
-                        targetPatrolX: engineRef.current.player.x,
-                        targetPatrolY: engineRef.current.player.y
-                      });
-                      setNotification('Spawned hostile Goblin enemy nearby!');
-                      setTimeout(() => setNotification(null), 2000);
-                    }}
-                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded font-medium flex items-center justify-center gap-2"
-                  >
-                    <Sword className="w-4 h-4 text-amber-400" />
-                    <span>Spawn Enemy at Player</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      if (!engineRef.current) return;
                       engineRef.current.player.gold += 100;
-                      setNotification('Added +100 Gold Coins!');
+                      setNotification('+100 Gold added!');
                       setTimeout(() => setNotification(null), 2000);
                     }}
                     className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded font-medium flex items-center justify-center gap-2 text-amber-300"
@@ -899,11 +875,16 @@ export default function App() {
                   </button>
 
                   <button
-                    onClick={handleResetWorld}
+                    onClick={() => {
+                      if (!engineRef.current) return;
+                      engineRef.current.levelManager.restartGame();
+                      setNotification('Game reset to Level 1!');
+                      setTimeout(() => setNotification(null), 2000);
+                    }}
                     className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded font-medium flex items-center justify-center gap-2 text-slate-300"
                   >
                     <RotateCcw className="w-4 h-4" />
-                    <span>Reset Game & Respawn All</span>
+                    <span>Restart Campaign (Level 1)</span>
                   </button>
                 </div>
               )}
@@ -911,7 +892,7 @@ export default function App() {
 
             {/* Panel Footer */}
             <div className="p-3 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between text-[11px] text-slate-500 font-mono">
-              <span>ZERO-DEP CANVAS 2D</span>
+              <span>MULTI-LEVEL ENGINE</span>
               <button
                 onClick={() => setPanelOpen(false)}
                 className="text-slate-400 hover:text-slate-200"

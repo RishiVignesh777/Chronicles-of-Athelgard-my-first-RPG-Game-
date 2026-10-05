@@ -176,6 +176,65 @@ class SoundSynthesizer {
     }
   }
 
+  public playLevelComplete() {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+      notes.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const start = t + idx * 0.08;
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.25, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.28);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.3);
+      });
+    } catch {
+      // Audio safety fallback
+    }
+  }
+
+  public playVictoryFanfare() {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      const chords = [
+        { freqs: [523.25, 659.25, 783.99], time: 0, dur: 0.2 },      // C major
+        { freqs: [587.33, 739.99, 880.00], time: 0.22, dur: 0.2 },   // D major
+        { freqs: [659.25, 830.61, 987.77], time: 0.44, dur: 0.2 },   // E major
+        { freqs: [783.99, 987.77, 1046.5, 1318.5], time: 0.68, dur: 0.8 } // High C triumphant chord
+      ];
+      chords.forEach(c => {
+        c.freqs.forEach(f => {
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const start = t + c.time;
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(f, start);
+          gain.gain.setValueAtTime(0.18, start);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + c.dur);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(start);
+          osc.stop(start + c.dur + 0.05);
+        });
+      });
+    } catch {
+      // Audio safety fallback
+    }
+  }
+
   public playStep() {
     if (!this.enabled) return;
     try {
