@@ -13,6 +13,8 @@
  *   - playerSpawn: [col, row] or { col: number, row: number } start location
  *   - exitTile: Tile ID (e.g. 10 for Portal) or specific [col, row] coordinate
  *   - tilesetUrl: (Optional) URL for unique level tileset (null = use default)
+ *   - backgroundMusicUrl: (Optional) URL to MP3/OGG/WAV BGM (null = procedural ambient)
+ *   - ambientColor: (Optional) CSS color tint overlay (e.g. 'rgba(20, 10, 40, 0.35)')
  *
  * TILE IDS REFERENCE (Default Tileset):
  *   0 = Grass (Walkable)
@@ -78,6 +80,8 @@ export type ExitTileSpec = number | [number, number] | { col: number; row: numbe
 export interface LevelConfig {
   name: string;
   tilesetUrl?: string | null;            // Optional custom tileset URL (null = default)
+  backgroundMusicUrl?: string | null;    // Optional level BGM audio URL (null = procedural ambient)
+  ambientColor?: string | null;          // Optional atmospheric lighting overlay (hex or rgba)
   playerSpawn: PlayerSpawnPoint;         // Starting grid coordinate [col, row] or {col, row}
   exitTile: ExitTileSpec;                // Tile ID (e.g. 10) or coordinate [col, row] that triggers next level
   exitTileId?: number;                   // Alias for convenience with Tiled exports
@@ -187,6 +191,8 @@ export const DEFAULT_LEVELS: LevelConfig[] = [
   {
     name: "Chapter 1: The Whispering Woods",
     tilesetUrl: null, // Uses default tileset
+    backgroundMusicUrl: null, // Paste MP3/OGG URL or leave null for procedural ambient
+    ambientColor: 'rgba(16, 65, 36, 0.14)', // Subtle emerald forest canopy tint
     playerSpawn: [2, 2], // [col, row]
     exitTile: 10,        // Tile 10 = Portal Gate
     exitTileId: 10,
@@ -205,6 +211,8 @@ export const DEFAULT_LEVELS: LevelConfig[] = [
   {
     name: "Chapter 2: The Crypt of Malice",
     tilesetUrl: null,
+    backgroundMusicUrl: null,
+    ambientColor: 'rgba(28, 16, 56, 0.36)', // Deep violet crypt gloom
     playerSpawn: [1, 1], // [col, row]
     exitTile: 10,
     exitTileId: 10,
@@ -224,6 +232,8 @@ export const DEFAULT_LEVELS: LevelConfig[] = [
   {
     name: "Chapter 3: Citadel of the Fallen King",
     tilesetUrl: null,
+    backgroundMusicUrl: null,
+    ambientColor: 'rgba(120, 53, 15, 0.22)', // Warm torchlit citadel amber tint
     playerSpawn: [15, 18], // Starts outside royal gates
     exitTile: 10,          // Golden throne portal triggers "Victory! You Win!"
     exitTileId: 10,

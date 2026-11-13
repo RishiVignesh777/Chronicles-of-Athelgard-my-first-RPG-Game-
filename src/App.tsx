@@ -30,7 +30,9 @@ import {
   ChevronRight,
   Plus,
   Trophy,
-  Compass
+  Compass,
+  Music,
+  SunMedium
 } from 'lucide-react';
 
 export default function App() {
@@ -135,6 +137,9 @@ export default function App() {
     const next = !soundEnabled;
     setSoundEnabled(next);
     soundEffects.enabled = next;
+    if (next) {
+      soundEffects.unlock();
+    }
   };
 
   const toggleColliders = () => {
@@ -167,6 +172,8 @@ export default function App() {
     const newLevel: LevelConfig = {
       name: `Chapter ${newLvlNum}: The Hidden Caverns`,
       tilesetUrl: null,
+      backgroundMusicUrl: null,
+      ambientColor: 'rgba(136, 19, 55, 0.25)',
       playerSpawn: [2, 2],
       exitTile: 10,
       exitTileId: 10,
@@ -242,6 +249,18 @@ export default function App() {
         engineRef.current.config.levels = updatedLevels;
       }
       return { ...prev, levels: updatedLevels };
+    });
+  };
+
+  const updateLevelProperty = (idx: number, patch: Partial<LevelConfig>) => {
+    setConfig(prev => {
+      const updated = [...prev.levels];
+      if (!updated[idx]) return prev;
+      updated[idx] = { ...updated[idx], ...patch };
+      if (engineRef.current) {
+        engineRef.current.config.levels = updated;
+      }
+      return { ...prev, levels: updated };
     });
   };
 
@@ -566,12 +585,125 @@ export default function App() {
                           <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
                             <span>Spawn: [{Array.isArray(lvl.playerSpawn) ? lvl.playerSpawn.join(',') : `${lvl.playerSpawn.col},${lvl.playerSpawn.row}`}]</span>
                             <span>Exit Tile: {typeof lvl.exitTile === 'number' ? lvl.exitTile : '10 (Portal)'}</span>
-                            <span>Grid: {lvl.mapData[0]?.length || 32}x{lvl.mapData.length || 20}</span>
+                            <span className="flex items-center gap-1">
+                              <span
+                                className="inline-block w-2.5 h-2.5 rounded-sm border border-slate-600"
+                                style={{ backgroundColor: lvl.ambientColor || 'transparent' }}
+                                title={lvl.ambientColor || 'No ambient tint'}
+                              />
+                              {lvl.mapData[0]?.length || 32}x{lvl.mapData.length || 20}
+                            </span>
                           </div>
                         </div>
                       );
                     })}
                   </div>
+
+                  {/* Atmosphere & Audio Settings for Selected Level */}
+                  {activeLevel && (
+                    <div className="pt-3 border-t border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                          <SunMedium className="w-3.5 h-3.5 text-amber-400" />
+                          Atmosphere &amp; Music (Lvl {selectedLevelIdx + 1})
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 text-[11px] mb-1">
+                          Ambient Color Overlay (CSS rgba / hex)
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <div
+                            className="w-7 h-7 rounded border border-slate-700 shrink-0"
+                            style={{ backgroundColor: activeLevel.ambientColor || 'transparent' }}
+                          />
+                          <input
+                            type="text"
+                            value={activeLevel.ambientColor || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              updateLevelProperty(selectedLevelIdx, { ambientColor: val || null });
+                              if (engineRef.current && selectedLevelIdx === stats.currentLevelIndex) {
+                                engineRef.current.levelManager.setTargetAmbientColor(val || null);
+                              }
+                            }}
+                            placeholder="rgba(28, 16, 56, 0.36) or #1c1038"
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {[
+                            { label: 'Forest', value: 'rgba(16, 65, 36, 0.14)' },
+                            { label: 'Crypt', value: 'rgba(28, 16, 56, 0.36)' },
+                            { label: 'Citadel', value: 'rgba(120, 53, 15, 0.22)' },
+                            { label: 'Crimson', value: 'rgba(136, 19, 55, 0.28)' },
+                            { label: 'Clear', value: '' }
+                          ].map((preset) => (
+                            <button
+                              key={preset.label}
+                              onClick={() => {
+                                const val = preset.value || null;
+                                updateLevelProperty(selectedLevelIdx, { ambientColor: val });
+                                if (engineRef.current && selectedLevelIdx === stats.currentLevelIndex) {
+                                  engineRef.current.levelManager.setTargetAmbientColor(val);
+                                }
+                              }}
+                              className="px-2 py-0.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] text-slate-300 flex items-center gap-1"
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full border border-slate-600"
+                                style={{ backgroundColor: preset.value || 'transparent' }}
+                              />
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 text-[11px] mb-1 flex items-center gap-1">
+                          <Music className="w-3 h-3 text-cyan-400" />
+                          Background Music URL (optional MP3/OGG)
+                        </label>
+                        <div className="flex gap-1.5">
+                          <input
+                            type="text"
+                            value={activeLevel.backgroundMusicUrl || ''}
+                            onChange={(e) => {
+                              updateLevelProperty(selectedLevelIdx, {
+                                backgroundMusicUrl: e.target.value || null
+                              });
+                            }}
+                            placeholder="https://.../theme.mp3 (blank = synth)"
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
+                          />
+                          <button
+                            onClick={() => {
+                              soundEffects.unlock();
+                              if (selectedLevelIdx === stats.currentLevelIndex) {
+                                soundEffects.playBackgroundMusic(
+                                  activeLevel.backgroundMusicUrl || null,
+                                  selectedLevelIdx
+                                );
+                                setNotification(
+                                  activeLevel.backgroundMusicUrl
+                                    ? 'Loaded custom level background music!'
+                                    : 'Switched to procedural chapter synth!'
+                                );
+                                setTimeout(() => setNotification(null), 2500);
+                              } else {
+                                handleSelectLevel(selectedLevelIdx);
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-200 text-[10px] font-semibold transition-colors"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Tile Palette & Live Painter for Selected Level */}
                   <div className="pt-2 border-t border-slate-800 space-y-3">

@@ -197,6 +197,9 @@ export class GameEngine {
 
         img.onload = () => {
           this.loadedImages.set(key, img);
+          if (key === 'tileset') {
+            this.loadedImages.set('defaultTileset', img);
+          }
           completed++;
           this.loadProgress = Math.round((completed / total) * 100);
           resolve();
@@ -212,6 +215,9 @@ export class GameEngine {
           const fallbackImg = new Image();
           fallbackImg.onload = () => {
             this.loadedImages.set(key, fallbackImg);
+            if (key === 'tileset') {
+              this.loadedImages.set('defaultTileset', fallbackImg);
+            }
             completed++;
             this.loadProgress = Math.round((completed / total) * 100);
             resolve();
@@ -238,6 +244,7 @@ export class GameEngine {
   // ============================================================================
   private initInputListeners(): void {
     window.addEventListener('keydown', (e) => {
+      soundEffects.unlock();
       this.keys[e.code] = true;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
         e.preventDefault();
@@ -258,7 +265,12 @@ export class GameEngine {
       this.keys[e.code] = false;
     });
 
+    this.canvas.addEventListener('pointerdown', () => {
+      soundEffects.unlock();
+    });
+
     this.canvas.addEventListener('click', () => {
+      soundEffects.unlock();
       if (this.levelManager.isGameComplete) {
         this.levelManager.restartGame();
       }
@@ -769,10 +781,13 @@ export class GameEngine {
 
     this.ctx.restore();
 
-    // 8. Draw Screen Space HUD (Health, Gold, Minimap, Current Level)
+    // 8. Draw Ambient Atmospheric Lighting Tint Overlay (World atmosphere, beneath HUD)
+    this.levelManager.renderAmbientOverlay(this.ctx, this.canvas.width, this.canvas.height);
+
+    // 9. Draw Screen Space HUD (Health, Gold, Minimap, Current Level)
     this.renderHUD();
 
-    // 9. Draw Level Transition Overlays & Victory Screen
+    // 10. Draw Level Transition Overlays & Victory Screen
     this.levelManager.renderOverlays(this.ctx, this.canvas.width, this.canvas.height);
   }
 
@@ -1055,6 +1070,7 @@ export class GameEngine {
 
   public stop(): void {
     this.isRunning = false;
+    soundEffects.stopBackgroundMusic();
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;

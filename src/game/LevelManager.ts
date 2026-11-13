@@ -4,15 +4,24 @@
  * ==============================================================================
  * Handles:
  * 1. Loading: Tearing down previous map collisions, swapping tilesets, & parsing new grid.
- * 2. Transitioning: Detecting AABB intersection with exitTile & running smooth fade transitions.
- * 3. Resetting: Clearing active enemies, chests, particles, & spawning player at playerSpawn.
- * 4. Game Complete: Transitioning to the Victory state when the final level exit is reached.
+ * 2. Audio & Visual Transitions: Crossfading level backgroundMusicUrl and smoothly
+ *    interpolating ambientColor atmospheric lighting overlays between stages.
+ * 3. Transitioning: Detecting AABB intersection with exitTile & running smooth fade transitions.
+ * 4. Resetting: Clearing active enemies, chests, particles, & spawning player at playerSpawn.
+ * 5. Game Complete: Transitioning to the Victory state when the final level exit is reached.
  * ==============================================================================
  */
 
-import { LevelConfig, PlayerSpawnPoint, ExitTileSpec } from './AssetConfig';
+import { LevelConfig, PlayerSpawnPoint } from './AssetConfig';
 import { GameEngine } from './engine';
 import { soundEffects } from './soundEffects';
+
+export interface RgbaColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
 
 export class LevelManager {
   public engine: GameEngine;
@@ -23,6 +32,11 @@ export class LevelManager {
   public transitionProgress: number = 0; // 0 -> 1 (fade out) -> 0 (fade in)
   public transitionPhase: 'in' | 'out' = 'out';
   public pendingLevelIndex: number | null = null;
+
+  // Ambient Color Atmospheric Lighting State
+  public currentAmbient: RgbaColor = { r: 0, g: 0, b: 0, a: 0 };
+  public targetAmbient: RgbaColor = { r: 0, g: 0, b: 0, a: 0 };
+  public ambientLerpSpeed: number = 3.5;
 
   // Level intro banner
   public bannerTimer: number = 0;
@@ -65,7 +79,7 @@ export class LevelManager {
     this.engine.particles = [];
     this.engine.floatingTexts = [];
 
-    // 2. Custom Tileset handling (if specified by level, swap or fallback)
+    // 2. Custom Tileset handling (swap custom URL or restore default tileset)
     if (level.tilesetUrl && level.tilesetUrl.trim() !== '') {
       try {
         await new Promise<void>((resolve) => {
@@ -77,6 +91,8 @@ export class LevelManager {
           };
           img.onerror = () => {
             console.warn(`[LevelManager] Failed to load custom tileset for "${level.name}". Falling back to default.`);
+            const defaultImg = this.engine.loadedImages.get('defaultTileset');
+            if (defaultImg) this.engine.loadedImages.set('tileset', defaultImg);
             resolve();
           };
           img.src = level.tilesetUrl!;
@@ -84,9 +100,20 @@ export class LevelManager {
       } catch {
         // Fallback safety
       }
+    } else {
+      const defaultImg = this.engine.loadedImages.get('defaultTileset');
+      if (defaultImg) {
+        this.engine.loadedImages.set('tileset', defaultImg);
+      }
     }
 
-    // 3. Resolve Player Spawn coordinates
+    // 3. Visual Transition: Set target ambient lighting color
+    this.setTargetAmbientColor(level.ambientColor);
+
+    // 4. Audio Transition: Start level backgroundMusicUrl (or procedural ambient fallback)
+    soundEffects.playBackgroundMusic(level.backgroundMusicUrl, levelIndex);
+
+    // 5. Resolve Player Spawn coordinates
     const spawnColRow = this.parseColRow(level.playerSpawn);
     this.engine.player.x = spawnColRow.col * ts;
     this.engine.player.y = spawnColRow.row * ts;
@@ -94,7 +121,7 @@ export class LevelManager {
     this.engine.player.vy = 0;
     this.engine.player.state = 'idle';
 
-    // 4. Register Chests & Interactables from Map Data
+    // 6. Register Chests & Interactables from Map Data
     const map = level.mapData;
     for (let r = 0; r < map.length; r++) {
       for (let c = 0; c < map[r].length; c++) {
@@ -104,7 +131,7 @@ export class LevelManager {
       }
     }
 
-    // 5. Spawn Enemies
+    // 7. Spawn Enemies
     if (level.enemySpawns && level.enemySpawns.length > 0) {
       let idCounter = 1;
       for (const sp of level.enemySpawns) {
@@ -135,15 +162,69 @@ export class LevelManager {
       this.spawnProceduralEnemies(map, ts);
     }
 
-    // 6. Camera Snap to player spawn
+    // 8. Camera Snap to player spawn
     const scale = this.engine.config.gameplayParams.renderScale;
     this.engine.camera.x = this.engine.player.x + 16 - (this.engine.canvas.width / (2 * scale));
     this.engine.camera.y = this.engine.player.y + 16 - (this.engine.canvas.height / (2 * scale));
 
-    // 7. Show Level Intro Banner
+    // 9. Show Level Intro Banner
     this.bannerText = level.name;
     this.bannerColor = level.themeColor || '#38bdf8';
     this.bannerTimer = 3.2; // Show for 3.2 seconds
+  }
+
+  public setTargetAmbientColor(color?: string | null): void {
+    this.targetAmbient = this.parseColor(color);
+  }
+
+  private parseColor(color?: string | null): RgbaColor {
+    if (!color || color.trim() === '') {
+      return { r: 0, g: 0, b: 0, a: 0 };
+    }
+
+    const trimmed = color.trim();
+
+    // Parse rgba(r, g, b, a) or rgb(r, g, b)
+    const rgbaMatch = trimmed.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+    if (rgbaMatch) {
+      return {
+        r: Math.min(255, Math.max(0, Number(rgbaMatch[1]))),
+        g: Math.min(255, Math.max(0, Number(rgbaMatch[2]))),
+        b: Math.min(255, Math.max(0, Number(rgbaMatch[3]))),
+        a: rgbaMatch[4] !== undefined ? Math.min(1, Math.max(0, Number(rgbaMatch[4]))) : 0.25
+      };
+    }
+
+    // Parse Hex (#RGB, #RRGGBB, #RRGGBBAA)
+    if (trimmed.startsWith('#')) {
+      const hex = trimmed.slice(1);
+      if (hex.length === 3) {
+        return {
+          r: parseInt(hex[0] + hex[0], 16),
+          g: parseInt(hex[1] + hex[1], 16),
+          b: parseInt(hex[2] + hex[2], 16),
+          a: 0.25
+        };
+      }
+      if (hex.length === 6) {
+        return {
+          r: parseInt(hex.slice(0, 2), 16),
+          g: parseInt(hex.slice(2, 4), 16),
+          b: parseInt(hex.slice(4, 6), 16),
+          a: 0.25
+        };
+      }
+      if (hex.length === 8) {
+        return {
+          r: parseInt(hex.slice(0, 2), 16),
+          g: parseInt(hex.slice(2, 4), 16),
+          b: parseInt(hex.slice(4, 6), 16),
+          a: parseInt(hex.slice(6, 8), 16) / 255
+        };
+      }
+    }
+
+    return { r: 0, g: 0, b: 0, a: 0 };
   }
 
   private spawnProceduralEnemies(map: number[][], ts: number): void {
@@ -235,6 +316,7 @@ export class LevelManager {
       return;
     }
 
+    soundEffects.fadeOutBackgroundMusic(400);
     soundEffects.playLevelComplete();
     this.engine.spawnBurstParticles(
       this.engine.player.x + 16,
@@ -255,6 +337,7 @@ export class LevelManager {
   public triggerVictory(): void {
     this.isGameComplete = true;
     this.victoryTimer = 0;
+    soundEffects.stopBackgroundMusic();
     soundEffects.playVictoryFanfare();
 
     this.engine.spawnBurstParticles(
@@ -279,9 +362,16 @@ export class LevelManager {
   }
 
   // ============================================================================
-  // UPDATE LOOP (Handles transitions, banners, and victory timer)
+  // UPDATE LOOP (Handles transitions, ambient color lerping, banners, victory)
   // ============================================================================
   public update(dt: number): void {
+    // 0. Smoothly interpolate ambient atmospheric color toward target level color
+    const ambientStep = Math.min(1.0, dt * this.ambientLerpSpeed);
+    this.currentAmbient.r += (this.targetAmbient.r - this.currentAmbient.r) * ambientStep;
+    this.currentAmbient.g += (this.targetAmbient.g - this.currentAmbient.g) * ambientStep;
+    this.currentAmbient.b += (this.targetAmbient.b - this.currentAmbient.b) * ambientStep;
+    this.currentAmbient.a += (this.targetAmbient.a - this.currentAmbient.a) * ambientStep;
+
     // 1. Victory Timer
     if (this.isGameComplete) {
       this.victoryTimer += dt;
@@ -329,8 +419,18 @@ export class LevelManager {
   }
 
   // ============================================================================
-  // RENDER TRANSITION & VICTORY OVERLAYS
+  // RENDER AMBIENT ATMOSPHERE & TRANSITION / VICTORY OVERLAYS
   // ============================================================================
+  public renderAmbientOverlay(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    if (this.currentAmbient.a <= 0.005) return;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = `rgba(${Math.round(this.currentAmbient.r)}, ${Math.round(this.currentAmbient.g)}, ${Math.round(this.currentAmbient.b)}, ${this.currentAmbient.a.toFixed(3)})`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
   public renderOverlays(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     // 1. Transition Fade Screen
     if (this.isTransitioning && this.transitionProgress > 0) {

@@ -142,6 +142,8 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
    * Each level definition contains:
    *   - name: Level title displayed in the transition banner
    *   - tilesetUrl: (Optional) URL to custom tileset image, or null for default
+   *   - backgroundMusicUrl: (Optional) URL to MP3/OGG/WAV BGM, or null for procedural synth
+   *   - ambientColor: (Optional) Atmospheric overlay tint e.g. "rgba(28, 16, 56, 0.36)" or "#1c1038"
    *   - playerSpawn: [col, row] or { col: X, row: Y } starting position
    *   - exitTile: Tile ID (e.g. 10 for portal) or [col, row] coordinate
    *   - mapData: 2D array matrix of tile IDs (compatible with Tiled map exports)
@@ -223,10 +225,141 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
     return c.toDataURL();
   }
 
-  // --- Sound Synthesis ---
+  // --- Sound Synthesis & Level BGM Manager ---
   const Audio = {
     ctx: null,
-    init() { if (!this.ctx && window.AudioContext) this.ctx = new AudioContext(); },
+    bgmAudio: null,
+    bgmTargetUrl: null,
+    bgmFadeTimer: null,
+    pendingBgm: null,
+    ambientInterval: null,
+    ambientGain: null,
+    ambientStep: 0,
+    init() {
+      if (!this.ctx && window.AudioContext) this.ctx = new AudioContext();
+      if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    },
+    unlock() {
+      this.init();
+      if (this.pendingBgm) {
+        const pending = this.pendingBgm;
+        this.pendingBgm = null;
+        this.playBgm(pending.url, pending.levelIdx);
+      } else if (this.bgmAudio && this.bgmAudio.paused && this.bgmTargetUrl) {
+        this.bgmAudio.play().catch(() => {});
+      }
+    },
+    playBgm(url, levelIdx) {
+      const cleanUrl = url && String(url).trim() !== '' ? String(url).trim() : null;
+      if (cleanUrl && this.bgmTargetUrl === cleanUrl && this.bgmAudio && !this.bgmAudio.paused) return;
+      this.stopBgm();
+      this.bgmTargetUrl = cleanUrl;
+
+      if (cleanUrl && typeof window.Audio !== 'undefined') {
+        try {
+          const el = new window.Audio();
+          el.crossOrigin = 'anonymous';
+          el.loop = true;
+          el.volume = 0;
+          el.src = cleanUrl;
+          this.bgmAudio = el;
+          el.addEventListener('error', () => {
+            if (this.bgmAudio === el) {
+              this.stopExternalBgm();
+              this.startAmbient(levelIdx);
+            }
+          }, { once: true });
+          const p = el.play();
+          if (p && typeof p.then === 'function') {
+            p.then(() => {
+              if (this.bgmAudio === el) this.fadeBgmVolume(el, 0, 0.35, 650);
+            }).catch(() => {
+              this.pendingBgm = { url: cleanUrl, levelIdx };
+            });
+          }
+          return;
+        } catch (e) {}
+      }
+      this.startAmbient(levelIdx);
+    },
+    fadeOutBgm(ms) {
+      this.stopAmbient();
+      if (this.bgmAudio) {
+        const el = this.bgmAudio;
+        this.fadeBgmVolume(el, el.volume, 0, ms || 400, () => {
+          if (this.bgmAudio === el) el.pause();
+        });
+      }
+    },
+    stopBgm() {
+      this.pendingBgm = null;
+      this.stopExternalBgm();
+      this.stopAmbient();
+    },
+    stopExternalBgm() {
+      if (this.bgmFadeTimer) { clearInterval(this.bgmFadeTimer); this.bgmFadeTimer = null; }
+      if (this.bgmAudio) {
+        try { this.bgmAudio.pause(); this.bgmAudio.src = ''; } catch (e) {}
+        this.bgmAudio = null;
+      }
+    },
+    fadeBgmVolume(el, from, to, ms, onDone) {
+      if (this.bgmFadeTimer) { clearInterval(this.bgmFadeTimer); this.bgmFadeTimer = null; }
+      const steps = Math.max(1, Math.floor((ms || 400) / 35));
+      let step = 0;
+      el.volume = Math.max(0, Math.min(1, from));
+      this.bgmFadeTimer = setInterval(() => {
+        step++;
+        const t = Math.min(1, step / steps);
+        try { el.volume = Math.max(0, Math.min(1, from + (to - from) * t)); } catch (e) {}
+        if (t >= 1) {
+          clearInterval(this.bgmFadeTimer);
+          this.bgmFadeTimer = null;
+          if (onDone) onDone();
+        }
+      }, 35);
+    },
+    startAmbient(levelIdx) {
+      this.stopAmbient();
+      this.init();
+      if (!this.ctx) return;
+      if (this.ctx.state === 'suspended') {
+        this.pendingBgm = { url: null, levelIdx };
+      }
+      const master = this.ctx.createGain();
+      master.gain.setValueAtTime(0.08, this.ctx.currentTime);
+      master.connect(this.ctx.destination);
+      this.ambientGain = master;
+      this.ambientStep = 0;
+      const scales = [
+        [220.0, 261.63, 329.63, 392.0, 329.63, 293.66],
+        [146.83, 174.61, 207.65, 220.0, 174.61, 155.56],
+        [196.0, 246.94, 293.66, 392.0, 329.63, 293.66]
+      ];
+      const scale = scales[(levelIdx || 0) % scales.length];
+      const pulse = () => {
+        if (!this.ctx || !this.ambientGain || this.ctx.state === 'suspended') return;
+        const t = this.ctx.currentTime;
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = (levelIdx % 3 === 1) ? 'triangle' : 'sine';
+        o.frequency.setValueAtTime(scale[this.ambientStep % scale.length], t);
+        this.ambientStep++;
+        g.gain.setValueAtTime(0.001, t);
+        g.gain.linearRampToValueAtTime(0.35, t + 0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 1.15);
+        o.connect(g); g.connect(this.ambientGain);
+        o.start(t); o.stop(t + 1.2);
+      };
+      pulse();
+      this.ambientInterval = setInterval(pulse, 950);
+    },
+    stopAmbient() {
+      if (this.ambientInterval) { clearInterval(this.ambientInterval); this.ambientInterval = null; }
+      if (this.ambientGain) {
+        try { this.ambientGain.disconnect(); } catch (e) {}
+        this.ambientGain = null;
+      }
+    },
     swing() {
       this.init(); if (!this.ctx) return;
       const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
@@ -300,9 +433,37 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
     transitionPhase: 'out',
     bannerTimer: 0,
     isGameComplete: false,
+    currentAmbient: { r: 0, g: 0, b: 0, a: 0 },
+    targetAmbient: { r: 0, g: 0, b: 0, a: 0 },
+    ambientLerpSpeed: 3.5,
 
     get current() {
       return GameLevels[this.currentIndex] || GameLevels[0];
+    },
+
+    parseColor(color) {
+      if (!color || String(color).trim() === '') return { r: 0, g: 0, b: 0, a: 0 };
+      const s = String(color).trim();
+      const m = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+      if (m) {
+        return {
+          r: Math.min(255, Math.max(0, Number(m[1]))),
+          g: Math.min(255, Math.max(0, Number(m[2]))),
+          b: Math.min(255, Math.max(0, Number(m[3]))),
+          a: m[4] !== undefined ? Math.min(1, Math.max(0, Number(m[4]))) : 0.25
+        };
+      }
+      if (s.startsWith('#')) {
+        const h = s.slice(1);
+        if (h.length === 3) return { r: parseInt(h[0]+h[0],16), g: parseInt(h[1]+h[1],16), b: parseInt(h[2]+h[2],16), a: 0.25 };
+        if (h.length === 6) return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16), a: 0.25 };
+        if (h.length === 8) return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16), a: parseInt(h.slice(6,8),16)/255 };
+      }
+      return { r: 0, g: 0, b: 0, a: 0 };
+    },
+
+    setTargetAmbientColor(color) {
+      this.targetAmbient = this.parseColor(color);
     },
 
     loadLevel(index) {
@@ -319,7 +480,22 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
       enemies = [];
       floatingTexts.length = 0;
 
-      // 2. Set Player Spawn
+      // 2. Swap custom tileset or restore default
+      if (lvl.tilesetUrl && String(lvl.tilesetUrl).trim() !== '') {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => { images.tileset = img; };
+        img.onerror = () => { if (images.defaultTileset) images.tileset = images.defaultTileset; };
+        img.src = lvl.tilesetUrl;
+      } else if (images.defaultTileset) {
+        images.tileset = images.defaultTileset;
+      }
+
+      // 3. Visual & Audio Transitions
+      this.setTargetAmbientColor(lvl.ambientColor);
+      Audio.playBgm(lvl.backgroundMusicUrl, index);
+
+      // 4. Set Player Spawn
       let spawnC = 1, spawnR = 1;
       if (Array.isArray(lvl.playerSpawn)) {
         spawnC = lvl.playerSpawn[0]; spawnR = lvl.playerSpawn[1];
@@ -330,25 +506,24 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
       player.y = spawnR * ts;
       player.state = 'idle';
 
-      // 3. Spawn enemies
+      // 5. Spawn enemies
       if (lvl.enemySpawns && lvl.enemySpawns.length > 0) {
         lvl.enemySpawns.forEach(sp => {
           enemies.push({ x: sp.col * ts, y: sp.row * ts, health: sp.health || 50, dead: false, animTimer: 0, hurtTimer: 0 });
         });
       } else {
-        // Default spawns
         enemies.push(
           { x: (spawnC + 5) * ts, y: (spawnR + 4) * ts, health: 50, dead: false, animTimer: 0, hurtTimer: 0 },
           { x: (spawnC + 8) * ts, y: (spawnR + 6) * ts, health: 50, dead: false, animTimer: 0, hurtTimer: 0 }
         );
       }
 
-      // 4. Center Camera
+      // 6. Center Camera
       const scale = AssetConfig.gameplayParams.renderScale;
       camera.x = player.x + 16 - canvas.width / (2 * scale);
       camera.y = player.y + 16 - canvas.height / (2 * scale);
 
-      // 5. Intro Banner
+      // 7. Intro Banner
       this.bannerTimer = 3.0;
     },
 
@@ -384,6 +559,7 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
         return;
       }
 
+      Audio.fadeOutBgm(400);
       Audio.levelUp();
       this.isTransitioning = true;
       this.transitionPhase = 'out';
@@ -392,6 +568,7 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
 
     triggerVictory() {
       this.isGameComplete = true;
+      Audio.stopBgm();
       Audio.victory();
     },
 
@@ -403,7 +580,22 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
       this.loadLevel(0);
     },
 
+    renderAmbientOverlay(c, w, h) {
+      if (this.currentAmbient.a <= 0.005) return;
+      c.save();
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.fillStyle = 'rgba(' + Math.round(this.currentAmbient.r) + ',' + Math.round(this.currentAmbient.g) + ',' + Math.round(this.currentAmbient.b) + ',' + this.currentAmbient.a.toFixed(3) + ')';
+      c.fillRect(0, 0, w, h);
+      c.restore();
+    },
+
     update(dt) {
+      const aStep = Math.min(1.0, dt * this.ambientLerpSpeed);
+      this.currentAmbient.r += (this.targetAmbient.r - this.currentAmbient.r) * aStep;
+      this.currentAmbient.g += (this.targetAmbient.g - this.currentAmbient.g) * aStep;
+      this.currentAmbient.b += (this.targetAmbient.b - this.currentAmbient.b) * aStep;
+      this.currentAmbient.a += (this.targetAmbient.a - this.currentAmbient.a) * aStep;
+
       if (this.isGameComplete) return;
 
       if (this.bannerTimer > 0) this.bannerTimer -= dt;
@@ -484,6 +676,7 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
   }
 
   window.addEventListener('keydown', (e) => {
+    Audio.unlock();
     keys[e.code] = true;
     if (e.code === 'Space') {
       if (LevelManager.isGameComplete) LevelManager.restartGame();
@@ -491,19 +684,21 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
     }
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+  canvas.addEventListener('pointerdown', () => { Audio.unlock(); });
   canvas.addEventListener('click', () => {
+    Audio.unlock();
     if (LevelManager.isGameComplete) LevelManager.restartGame();
   });
 
   const touch = { u: false, d: false, l: false, r: false };
   function bind(id, k) {
     const el = document.getElementById(id); if (!el) return;
-    el.addEventListener('touchstart', (e) => { e.preventDefault(); touch[k] = true; });
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); Audio.unlock(); touch[k] = true; });
     el.addEventListener('touchend', (e) => { e.preventDefault(); touch[k] = false; });
   }
   bind('btn-up', 'u'); bind('btn-down', 'd'); bind('btn-left', 'l'); bind('btn-right', 'r');
   const atkEl = document.getElementById('btn-attack');
-  if (atkEl) atkEl.addEventListener('touchstart', (e) => { e.preventDefault(); doAttack(); });
+  if (atkEl) atkEl.addEventListener('touchstart', (e) => { e.preventDefault(); Audio.unlock(); doAttack(); });
 
   let lastTime = performance.now();
   function loop(now) {
@@ -607,6 +802,9 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
 
     ctx.restore();
 
+    // Ambient Atmospheric Lighting Overlay
+    LevelManager.renderAmbientOverlay(ctx, canvas.width, canvas.height);
+
     // Screen HUD
     ctx.fillStyle = 'rgba(15,23,42,0.85)';
     ctx.fillRect(16, 16, 210, 60);
@@ -669,7 +867,7 @@ export function generateStandaloneIndexHtml(config: AssetConfigType): string {
   Promise.all([
     new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.player=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.player=f; r();}; f.src=genPlayer(); }; i.src=AssetConfig.playerSpriteSheet||genPlayer(); }),
     new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.enemy=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.enemy=f; r();}; f.src=genEnemy(); }; i.src=AssetConfig.enemySpriteSheet||genEnemy(); }),
-    new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.tileset=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.tileset=f; r();}; f.src=genTileset(); }; i.src=AssetConfig.tileSet||genTileset(); })
+    new Promise(r => { const i = new Image(); i.crossOrigin='anonymous'; i.onload = () => { images.tileset=i; images.defaultTileset=i; r(); }; i.onerror = () => { const f=new Image(); f.onload=()=>{images.tileset=f; images.defaultTileset=f; r();}; f.src=genTileset(); }; i.src=AssetConfig.tileSet||genTileset(); })
   ]).then(() => {
     LevelManager.loadLevel(0);
     requestAnimationFrame(loop);
